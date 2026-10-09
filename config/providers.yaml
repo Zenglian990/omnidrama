@@ -1,0 +1,37 @@
+# OmniDrama 多模型热插拔配置中心
+# 当前阶段：所有 API 处于模拟/降级就绪状态，无需充值即可离线完整运行
+# 后续获得商业 Key 时，直接填入即可无缝激活百亿参数电影级渲染通道
+
+providers:
+  llm:
+    active: "offline_rules" # 可选: deepseek, gemini, offline_rules
+    deepseek:
+      api_key: ""
+      base_url: "https://api.deepseek.com/v1"
+      model: "deepseek-chat"
+    gemini:
+      api_key: ""
+      model: "gemini-2.5-flash"
+
+  image:
+    active: "pollinations_flux" # 可选: pollinations_flux, comfyui_local, siliconflow
+    siliconflow:
+      api_key: ""
+      model: "black-forest-labs/FLUX.1-schnell"
+    comfyui_local:
+      server_address: "127.0.0.1:8188"
+
+  video:
+    active: "local_motion_engine" # 可选: local_motion_engine, kling, minimax_hailuo, wan2.1
+    minimax_hailuo:
+      api_key: ""
+      group_id: ""
+      model: "video-01"
+    kling:
+      access_key: ""
+      secret_key: ""
+      model: "kling-v1.5"
+
+  audio:
+    tts: "edge_tts" # 微软免费神经配音
+    sfx: "ffmpeg_acoustic_synth" # FFmpeg 原生拟音合成器

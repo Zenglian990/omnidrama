@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Virtual Environments
+.env
+.venv
+env/
+venv/
+ENV/
+
+# Large media outputs (prevent Git bloating)
+output/*
+!output/.gitkeep
+temp*
+*.mp4
+*.wav
+
+# OS files
+.DS_Store
+Thumbs.db

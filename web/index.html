@@ -1,0 +1,341 @@
+<!DOCTYPE html>
+<html lang="zh-CN" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>OmniDrama 灵眸漫剧 - 工业级 AI 漫剧导演工作台</title>
+  <!-- Tailwind CSS & FontAwesome -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            brand: {
+              cyan: '#00F2FE',
+              purple: '#7928CA',
+              dark: '#0B0E14',
+              card: '#141824',
+              border: '#232938'
+            }
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    body {
+      background-color: #080A0F;
+      color: #E2E8F0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Microsoft YaHei", sans-serif;
+    }
+    ::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    ::-webkit-scrollbar-track {
+      background: #0B0E14;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: #232938;
+      border-radius: 3px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: #00F2FE;
+    }
+    .neon-glow {
+      box-shadow: 0 0 15px rgba(0, 242, 254, 0.2);
+    }
+  </style>
+</head>
+<body class="h-screen flex flex-col overflow-hidden">
+  <div id="app" class="flex flex-col h-full">
+
+    <!-- 顶部导航栏 -->
+    <header class="h-14 border-b border-brand-border bg-brand-dark px-6 flex items-center justify-between flex-shrink-0">
+      <div class="flex items-center space-x-3">
+        <div class="w-8 h-8 rounded-lg bg-gradient-to-tr from-brand-cyan to-brand-purple flex items-center justify-center font-black text-black text-lg">
+          Ω
+        </div>
+        <div>
+          <span class="font-bold text-lg tracking-wider bg-gradient-to-r from-brand-cyan to-purple-400 bg-clip-text text-transparent">
+            OmniDrama
+          </span>
+          <span class="text-xs text-gray-400 ml-2 px-2 py-0.5 rounded bg-brand-border">灵眸漫剧工作台 v1.0</span>
+        </div>
+      </div>
+
+      <!-- 中间项目状态 -->
+      <div class="flex items-center space-x-6 text-sm">
+        <div class="flex items-center space-x-2">
+          <span class="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse"></span>
+          <span class="text-gray-300">当前项目:</span>
+          <span class="font-semibold text-brand-cyan">《{{ project.title }}》</span>
+        </div>
+        <div class="text-xs text-gray-400">
+          <i class="fa-solid fa-film text-purple-400 mr-1"></i> 分镜: {{ project.shots.length }} 镜
+        </div>
+        <div class="text-xs text-gray-400">
+          <i class="fa-solid fa-clock text-amber-400 mr-1"></i> 总长: {{ project.duration }}s
+        </div>
+      </div>
+
+      <!-- 右侧操作 -->
+      <div class="flex items-center space-x-3">
+        <a :href="project.video_url" download class="px-3.5 py-1.5 rounded-lg bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-black font-semibold text-xs transition flex items-center space-x-1.5 shadow-lg shadow-cyan-500/20">
+          <i class="fa-solid fa-download"></i>
+          <span>下载成片 (1080P)</span>
+        </a>
+        <a :href="project.srt_url" download class="px-3 py-1.5 rounded-lg bg-brand-border hover:bg-gray-700 text-gray-200 text-xs transition flex items-center space-x-1.5">
+          <i class="fa-solid fa-closed-captioning"></i>
+          <span>导出字幕</span>
+        </a>
+      </div>
+    </header>
+
+    <!-- 主工作区：三栏布局 -->
+    <main class="flex-1 flex overflow-hidden">
+
+      <!-- 左栏：角色资产库与声音控制台 (280px) -->
+      <aside class="w-72 border-r border-brand-border bg-brand-dark p-4 flex flex-col space-y-4 overflow-y-auto flex-shrink-0">
+        
+        <!-- 角色定妆资产库 -->
+        <div>
+          <h2 class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2 flex items-center justify-between">
+            <span><i class="fa-solid fa-users text-brand-cyan mr-1.5"></i> 角色定妆资产卡</span>
+            <span class="text-[10px] text-gray-500">{{ project.characters.length }} 位出场</span>
+          </h2>
+          <div class="space-y-2.5">
+            <div v-for="char in project.characters" :key="char.name" class="p-2.5 rounded-lg bg-brand-card border border-brand-border hover:border-brand-cyan/50 transition">
+              <div class="flex items-center space-x-2.5">
+                <img :src="char.avatar" class="w-11 h-11 rounded-lg object-cover border border-gray-700">
+                <div class="flex-1 min-w-0">
+                  <div class="font-bold text-sm text-gray-100 flex items-center justify-between">
+                    <span class="truncate">{{ char.name }}</span>
+                    <span class="text-[10px] px-1.5 py-0.5 rounded bg-brand-border text-amber-300">{{ char.role }}</span>
+                  </div>
+                  <div class="text-[11px] text-brand-cyan truncate mt-0.5">
+                    <i class="fa-solid fa-microphone text-[10px] mr-1"></i>{{ char.voice }}
+                  </div>
+                </div>
+              </div>
+              <p class="text-[10px] text-gray-400 mt-2 line-clamp-1 border-t border-gray-800/60 pt-1.5">
+                {{ char.traits }}
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <!-- 电影级多轨声音引擎状态 -->
+        <div class="border-t border-brand-border pt-3">
+          <h2 class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2 flex items-center justify-between">
+            <span><i class="fa-solid fa-sliders text-purple-400 mr-1.5"></i> 三轨合一电影混音</span>
+            <span class="w-2 h-2 rounded-full bg-emerald-400"></span>
+          </h2>
+          <div class="space-y-2">
+            <div v-for="t in project.audio_tracks" :key="t.track" class="p-2 rounded bg-brand-card border border-brand-border text-xs flex flex-col space-y-1">
+              <div class="flex items-center justify-between">
+                <span class="font-medium text-gray-200">{{ t.track }}</span>
+                <span class="text-[10px] px-1.5 py-0.5 rounded bg-emerald-950 text-emerald-400 border border-emerald-800">{{ t.status }}</span>
+              </div>
+              <span class="text-[10px] text-gray-500 truncate">{{ t.source }}</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- 系统提示 -->
+        <div class="mt-auto p-3 rounded-lg bg-cyan-950/20 border border-cyan-800/30 text-[11px] text-gray-400">
+          <i class="fa-solid fa-circle-check text-brand-cyan mr-1"></i>
+          <span>角色锁脸已固化，全片 10 个分镜已完成音画对齐。</span>
+        </div>
+      </aside>
+
+      <!-- 中栏：分镜画布与镜头清单 (自适应) -->
+      <section class="flex-1 flex flex-col bg-[#07090E] overflow-hidden">
+        
+        <!-- 分镜栏头部 -->
+        <div class="h-11 px-6 border-b border-brand-border bg-brand-dark/50 flex items-center justify-between flex-shrink-0">
+          <div class="text-xs font-bold text-gray-300 flex items-center space-x-2">
+            <span><i class="fa-solid fa-clapperboard text-brand-cyan mr-1.5"></i> 全部分镜列表 (Storyboard Flow)</span>
+            <span class="text-gray-500 font-normal">点击任意分镜可在右侧立即试听与检查</span>
+          </div>
+          <div class="text-[11px] text-gray-400 flex items-center space-x-3">
+            <span><span class="w-2 h-2 rounded-full bg-cyan-400 inline-block mr-1"></span>推镜头 (Zoom-In)</span>
+            <span><span class="w-2 h-2 rounded-full bg-purple-400 inline-block mr-1"></span>横移 (Pan)</span>
+            <span><span class="w-2 h-2 rounded-full bg-amber-400 inline-block mr-1"></span>震动 (Shake)</span>
+          </div>
+        </div>
+
+        <!-- 分镜卡片滚动区 -->
+        <div class="flex-1 p-6 overflow-y-auto space-y-3.5">
+          <div 
+            v-for="shot in project.shots" 
+            :key="shot.id"
+            @click="selectedShot = shot"
+            :class="{'border-brand-cyan ring-1 ring-brand-cyan/40': selectedShot.id === shot.id}"
+            class="p-4 rounded-xl bg-brand-card border border-brand-border hover:border-gray-600 transition flex space-x-4 cursor-pointer"
+          >
+            <!-- 缩略图 -->
+            <div class="w-24 h-40 rounded-lg overflow-hidden bg-black flex-shrink-0 relative border border-gray-800">
+              <img :src="shot.image" class="w-full h-full object-cover">
+              <span class="absolute top-1 left-1 px-1.5 py-0.5 rounded bg-black/80 text-[10px] text-brand-cyan font-bold font-mono">
+                #{{ shot.id < 10 ? '0' + shot.id : shot.id }}
+              </span>
+            </div>
+
+            <!-- 分镜详情 -->
+            <div class="flex-1 flex flex-col justify-between py-1">
+              <div>
+                <!-- 镜头标签 -->
+                <div class="flex items-center space-x-2 mb-2">
+                  <span class="px-2 py-0.5 rounded text-[10px] font-bold bg-brand-border text-cyan-300">
+                    {{ shot.scale }}
+                  </span>
+                  <span class="px-2 py-0.5 rounded text-[10px] font-bold bg-purple-950 text-purple-300 border border-purple-800">
+                    {{ shot.motion_name }}
+                  </span>
+                  <span v-if="shot.sfx !== '无'" class="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-950 text-amber-300 border border-amber-800">
+                    <i class="fa-solid fa-bolt mr-1"></i>{{ shot.sfx }}
+                  </span>
+                </div>
+
+                <!-- 说话人与台词 -->
+                <div class="flex items-baseline space-x-2 mb-1.5">
+                  <span class="font-bold text-sm text-amber-300">【{{ shot.speaker }}】</span>
+                </div>
+                <p class="text-sm text-gray-200 font-medium leading-relaxed">
+                  {{ shot.dialogue }}
+                </p>
+              </div>
+
+              <!-- 底部音频控制器 -->
+              <div class="flex items-center justify-between border-t border-gray-800/80 pt-2 mt-2">
+                <audio :src="shot.audio" controls class="h-6 w-56"></audio>
+                <div class="text-[11px] text-gray-500">
+                  <i class="fa-solid fa-check-circle text-emerald-400 mr-1"></i>音视频对齐
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 右栏：院线级监视器与成片播放器 (440px) -->
+      <aside class="w-[440px] border-l border-brand-border bg-brand-dark p-6 flex flex-col space-y-4 overflow-y-auto flex-shrink-0">
+        <h2 class="text-xs font-bold text-gray-400 uppercase tracking-wider flex items-center justify-between">
+          <span><i class="fa-solid fa-tv text-brand-cyan mr-1.5"></i> 院线级主监视器 (Master Player)</span>
+          <span class="text-xs text-brand-cyan font-mono">1080P · 24FPS</span>
+        </h2>
+
+        <!-- 播放模式切换 Tab -->
+        <div class="flex items-center space-x-2 bg-brand-card p-1 rounded-xl border border-brand-border">
+          <button 
+            @click="activeVideoMode = 'full'"
+            :class="activeVideoMode === 'full' ? 'bg-gradient-to-r from-cyan-500 to-blue-600 text-black font-bold shadow' : 'text-gray-400 hover:text-white'"
+            class="flex-1 py-1.5 rounded-lg text-xs transition flex items-center justify-center space-x-1"
+          >
+            <i class="fa-solid fa-clapperboard text-[11px]"></i>
+            <span>全片 61s 电影级成片</span>
+          </button>
+          <button 
+            @click="activeVideoMode = 'live'"
+            :class="activeVideoMode === 'live' ? 'bg-gradient-to-r from-purple-500 to-pink-500 text-white font-bold shadow' : 'text-gray-400 hover:text-white'"
+            class="flex-1 py-1.5 rounded-lg text-xs transition flex items-center justify-center space-x-1"
+          >
+            <i class="fa-solid fa-person-running text-[11px]"></i>
+            <span>🔥 真人演员活化 (口型+眨眼)</span>
+          </button>
+        </div>
+
+        <!-- 播放器主体 -->
+        <div class="w-full aspect-[9/16] rounded-2xl overflow-hidden bg-black border border-brand-border shadow-2xl relative">
+          <video 
+            ref="masterVideo"
+            :src="activeVideoMode === 'full' ? project.video_url : project.live_actor_video" 
+            controls 
+            autoplay 
+            loop 
+            class="w-full h-full object-contain"
+          ></video>
+        </div>
+
+        <!-- 播放器信息面板 -->
+        <div class="p-3.5 rounded-xl bg-brand-card border border-brand-border text-xs space-y-2">
+          <div class="flex justify-between text-gray-400">
+            <span>分辨率:</span>
+            <span class="text-gray-200 font-mono">720 × 1280 (9:16 竖屏短剧)</span>
+          </div>
+          <div class="flex justify-between text-gray-400">
+            <span>总时长:</span>
+            <span class="text-gray-200 font-mono">{{ project.duration }} 秒 (全 10 镜完结)</span>
+          </div>
+          <div class="flex justify-between text-gray-400">
+            <span>声音系统:</span>
+            <span class="text-emerald-400 font-semibold">三轨合一影视级母带 (AAC 256k)</span>
+          </div>
+          <div class="flex justify-between text-gray-400">
+            <span>运镜渲染:</span>
+            <span class="text-brand-cyan font-semibold">FFmpeg 2.5D 电影级动态滤波</span>
+          </div>
+        </div>
+
+        <!-- 快捷操作按钮 -->
+        <div class="pt-2">
+          <a :href="project.video_url" download class="w-full py-3 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-black font-bold text-sm text-center block transition shadow-xl shadow-cyan-500/25">
+            <i class="fa-solid fa-download mr-1.5"></i> 立即导出成片 MP4
+          </a>
+        </div>
+      </aside>
+
+    </main>
+  </div>
+
+  <script>
+    const { createApp, ref, onMounted } = Vue;
+
+    createApp({
+      setup() {
+        const project = ref({
+          title: "至尊龙王归位",
+          genre: "都市战神爽文",
+          duration: 61.61,
+          video_url: "/output/至尊龙王归位/至尊龙王归位_影视级成片.mp4",
+          srt_url: "/output/至尊龙王归位/至尊龙王归位.srt",
+          characters: [],
+          shots: [],
+          audio_tracks: []
+        });
+
+        const activeVideoMode = ref('full');
+        const selectedShot = ref({});
+
+        const fetchProject = async () => {
+          try {
+            const res = await fetch('/api/project');
+            const data = await res.json();
+            project.value = data;
+            if (data.shots && data.shots.length > 0) {
+              selectedShot.value = data.shots[0];
+            }
+          } catch (e) {
+            console.error('Failed to load project', e);
+          }
+        };
+
+        onMounted(() => {
+          fetchProject();
+        });
+
+        return {
+          project,
+          selectedShot,
+          activeVideoMode
+        };
+      }
+    }).mount('#app');
+  </script>
+</body>
+</html>
