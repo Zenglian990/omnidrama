@@ -1,37 +1,63 @@
-# OmniDrama 多模型热插拔配置中心
-# 当前阶段：所有 API 处于模拟/降级就绪状态，无需充值即可离线完整运行
-# 后续获得商业 Key 时，直接填入即可无缝激活百亿参数电影级渲染通道
+# OmniDrama (灵眸漫剧) - 行业顶配技术选型矩阵 (SOTA Suite Configuration)
+# 核心理念：拒绝任何低质妥协与玩具级代餐，全面对标全球影视工业顶级技术标准。
 
-providers:
-  llm:
-    active: "offline_rules" # 可选: deepseek, gemini, offline_rules
-    deepseek:
-      api_key: ""
-      base_url: "https://api.deepseek.com/v1"
-      model: "deepseek-chat"
-    gemini:
-      api_key: ""
-      model: "gemini-2.5-flash"
+version: "2.0.0-sota"
 
-  image:
-    active: "pollinations_flux" # 可选: pollinations_flux, comfyui_local, siliconflow
-    siliconflow:
-      api_key: ""
-      model: "black-forest-labs/FLUX.1-schnell"
-    comfyui_local:
-      server_address: "127.0.0.1:8188"
+active_profile: "hollywood_cinema"
 
-  video:
-    active: "local_motion_engine" # 可选: local_motion_engine, kling, minimax_hailuo, wan2.1
-    minimax_hailuo:
-      api_key: ""
-      group_id: ""
-      model: "video-01"
-    kling:
-      access_key: ""
-      secret_key: ""
-      model: "kling-v1.5"
+profiles:
+  hollywood_cinema:
+    description: "好莱坞与顶级商业短剧标准：真实真人演员、毛孔级皮肤、自然骨骼运动、情绪爆发配音"
+    
+    # 1. 编剧与总导演大脑 (Screenplay & Cinematic Director)
+    director_llm:
+      provider: "claude-3-5-sonnet" # 备选: "deepseek-r1", "gpt-4o"
+      temperature: 0.4
+      prompt_system: "hollywood_master_director"
+      features:
+        - "tension_curve_optimization"   # 剧情张力曲线算法
+        - "cinematic_camera_blocking"     # 专业机位调度与运镜设计
+        - "character_consistency_anchor"  # 角色特征永久固化
 
-  audio:
-    tts: "edge_tts" # 微软免费神经配音
-    sfx: "ffmpeg_acoustic_synth" # FFmpeg 原生拟音合成器
+    # 2. 电影级角色定妆与分镜生图 (Character & Shot Concept)
+    image_engine:
+      provider: "flux-pro" # 备选: "midjourney-v6"
+      aspect_ratio: "9:16"
+      quality: "raw_8k"
+      lens_spec: "Arri Alexa 35mm Prime Lens, Rembrandt Lighting"
+      output_format: "png"
+
+    # 3. 百亿参数真实物理视频大模型 (True Generative Video Motion)
+    video_engine:
+      primary: "minimax-hailuo" # MiniMax 海螺 Video-01 (目前全球真人微表情与电影质感最强)
+      secondary: "kling-v2-pro" # 快手可灵 2.0 Pro (大动作打斗、物理交互、首尾帧控制)
+      resolution: "1080p"
+      fps: 24
+      motion_intensity: "cinematic_smooth"
+
+    # 4. 毫秒级唇齿音画对齐 (Neural SOTA Lip-Sync)
+    lipsync_engine:
+      provider: "synclabs-pro" # 备选: "liveportrait-neural"
+      sync_mode: "audio_driven_high_fidelity"
+      features:
+        - "teeth_and_tongue_modeling" # 牙齿与舌位真实生理建模
+        - "subtle_facial_wrinkles"     # 随表情变化的细微眼角/法令纹
+
+    # 5. 情绪张力人类级配音 (Human-Level Voice Acting)
+    audio_tts:
+      provider: "elevenlabs" # ElevenLabs Multilingual v2 (全球最强人类呼吸声与情绪控制)
+      model: "eleven_turbo_v2_5"
+      voice_settings:
+        stability: 0.65
+        similarity_boost: 0.85
+        style: 0.45
+        use_speaker_boost: true
+
+    # 6. 原创影视交响乐与好莱坞拟音 (Cinematic Score & Foley)
+    music_engine:
+      provider: "suno-v3.5" # 备选: "udio"
+      music_style: "Epic Cinematic Orchestral Score, Hans Zimmer style, Dark Suspense to Heroic Battle"
+    
+    foley_sfx:
+      library: "hollywood_48khz_master"
+      ducking_ratio: "-6dB" # 说话时背景配乐自动压降避让

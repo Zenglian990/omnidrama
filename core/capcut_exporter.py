@@ -93,3 +93,24 @@ class CapCutExporter:
             json.dump(draft_info, f, ensure_ascii=False, indent=2)
 
         return str(draft_folder)
+
+    @staticmethod
+    def get_system_jianying_draft_path() -> Optional[str]:
+        """自动探测 Windows 系统中剪映专业版 (Jianying Pro) 的本地工程草稿根路径."""
+        local_app_data = os.environ.get("LOCALAPPDATA")
+        if not local_app_data:
+            return None
+        candidate = Path(local_app_data) / "JianyingPro" / "User Data" / "Projects" / "com.lveditor.draft"
+        if candidate.exists():
+            return str(candidate)
+        return None
+
+    def export_to_system_jianying(
+        self,
+        project_title: str,
+        shots: List[Dict[str, Any]]
+    ) -> str:
+        """直接无缝注入到系统剪映专业版草稿箱，打开剪映即可直接在首屏看到此工程."""
+        system_path = self.get_system_jianying_draft_path()
+        target_dir = system_path if system_path else "./output/drafts"
+        return self.export_draft(project_title, shots, target_dir)

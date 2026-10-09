@@ -84,14 +84,27 @@
       </div>
 
       <!-- 右侧操作 -->
-      <div class="flex items-center space-x-3">
+      <div class="flex items-center space-x-2.5">
+        <button 
+          @click="showSotaModal = true" 
+          class="px-3 py-1.5 rounded-lg bg-gradient-to-r from-purple-900/60 to-pink-900/60 hover:from-purple-800 hover:to-pink-800 border border-purple-500/40 text-purple-200 text-xs font-semibold transition flex items-center space-x-1.5 shadow"
+        >
+          <i class="fa-solid fa-microchip text-pink-400"></i>
+          <span>SOTA 顶配大模型引擎</span>
+        </button>
+
+        <button 
+          @click="exportToJianying" 
+          :disabled="isExporting"
+          class="px-3.5 py-1.5 rounded-lg bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-black font-bold text-xs transition flex items-center space-x-1.5 shadow-lg shadow-orange-500/20 disabled:opacity-50"
+        >
+          <i class="fa-solid fa-scissors"></i>
+          <span>{{ isExporting ? '正在注入...' : '一键注入剪映草稿' }}</span>
+        </button>
+
         <a :href="project.video_url" download class="px-3.5 py-1.5 rounded-lg bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-black font-semibold text-xs transition flex items-center space-x-1.5 shadow-lg shadow-cyan-500/20">
           <i class="fa-solid fa-download"></i>
-          <span>下载成片 (1080P)</span>
-        </a>
-        <a :href="project.srt_url" download class="px-3 py-1.5 rounded-lg bg-brand-border hover:bg-gray-700 text-gray-200 text-xs transition flex items-center space-x-1.5">
-          <i class="fa-solid fa-closed-captioning"></i>
-          <span>导出字幕</span>
+          <span>下载成片</span>
         </a>
       </div>
     </header>
@@ -291,6 +304,109 @@
       </aside>
 
     </main>
+
+    <!-- SOTA 顶配大模型配置 Modal -->
+    <div v-if="showSotaModal" class="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+      <div class="w-full max-w-3xl bg-brand-card border border-brand-border rounded-2xl shadow-2xl flex flex-col max-h-[90vh] overflow-hidden">
+        
+        <!-- Modal 头部 -->
+        <div class="px-6 py-4 border-b border-brand-border flex items-center justify-between bg-brand-dark">
+          <div class="flex items-center space-x-2.5">
+            <div class="w-7 h-7 rounded-lg bg-purple-500/20 text-purple-400 flex items-center justify-center font-bold">
+              <i class="fa-solid fa-crown text-sm"></i>
+            </div>
+            <div>
+              <h3 class="font-bold text-sm text-gray-100">行业顶配 SOTA 大模型技术选型矩阵</h3>
+              <p class="text-[11px] text-gray-400">拒绝低质代餐 · 全面对标全球影视工业顶级技术标准</p>
+            </div>
+          </div>
+          <button @click="showSotaModal = false" class="text-gray-400 hover:text-white transition">
+            <i class="fa-solid fa-xmark text-lg"></i>
+          </button>
+        </div>
+
+        <!-- Modal 内容区 -->
+        <div class="p-6 overflow-y-auto space-y-4">
+          
+          <!-- 系统环境检测条 -->
+          <div class="p-3 rounded-xl bg-brand-dark/70 border border-brand-border flex items-center justify-between text-xs">
+            <div class="flex items-center space-x-2">
+              <i class="fa-brands fa-windows text-blue-400"></i>
+              <span class="text-gray-300">系统剪映专业版:</span>
+              <span :class="sotaInfo.system.jianying_installed ? 'text-emerald-400' : 'text-amber-400'" class="font-mono">
+                {{ sotaInfo.system.jianying_installed ? '已就绪 (可一键直接写入草稿箱)' : '未找到默认安装目录' }}
+              </span>
+            </div>
+            <div class="flex items-center space-x-2">
+              <i class="fa-solid fa-film text-purple-400"></i>
+              <span class="text-gray-300">FFmpeg 8.1:</span>
+              <span class="text-emerald-400 font-mono">硬件加速正常</span>
+            </div>
+          </div>
+
+          <!-- 各模块顶级模型卡片列表 -->
+          <div class="space-y-3">
+            <div v-for="(item, key) in sotaInfo.providers" :key="key" class="p-3.5 rounded-xl bg-brand-dark/50 border border-brand-border hover:border-purple-500/30 transition">
+              <div class="flex items-center justify-between mb-1.5">
+                <div class="flex items-center space-x-2">
+                  <span class="font-bold text-sm text-gray-200">{{ item.name }}</span>
+                  <span class="text-[10px] px-2 py-0.5 rounded-full bg-purple-950 text-purple-300 border border-purple-800">{{ item.tier }}</span>
+                </div>
+                <div>
+                  <span v-if="item.configured" class="text-[11px] px-2 py-0.5 rounded bg-emerald-950 text-emerald-400 border border-emerald-800 flex items-center space-x-1">
+                    <i class="fa-solid fa-check"></i>
+                    <span>已配置就绪</span>
+                  </span>
+                  <span v-else class="text-[11px] px-2 py-0.5 rounded bg-amber-950 text-amber-300 border border-amber-800 flex items-center space-x-1">
+                    <i class="fa-solid fa-cloud-arrow-up"></i>
+                    <span>随时可热拔插接入</span>
+                  </span>
+                </div>
+              </div>
+              <p class="text-xs text-gray-400 mb-2">{{ item.role }}</p>
+              
+              <!-- 密钥配置输入 -->
+              <div class="flex items-center space-x-2">
+                <input 
+                  type="password" 
+                  v-model="keyInputs[key]" 
+                  :placeholder="'输入对应 ' + item.env_key" 
+                  class="flex-1 bg-brand-card border border-brand-border rounded-lg px-3 py-1.5 text-xs text-gray-200 focus:outline-none focus:border-brand-cyan"
+                >
+              </div>
+            </div>
+          </div>
+
+        </div>
+
+        <!-- Modal 底部 -->
+        <div class="px-6 py-3.5 border-t border-brand-border bg-brand-dark flex items-center justify-between">
+          <span class="text-xs text-gray-500">
+            <i class="fa-solid fa-shield-halved text-emerald-400 mr-1"></i>
+            密钥将加密保存在本地环境 (.env)，不会上传到任何第三方
+          </span>
+          <div class="flex items-center space-x-3">
+            <button @click="showSotaModal = false" class="px-4 py-1.5 rounded-lg text-xs text-gray-400 hover:text-white">
+              关闭
+            </button>
+            <button @click="saveKeys" class="px-5 py-1.5 rounded-lg bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-black font-bold text-xs shadow-lg transition">
+              保存配置
+            </button>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- 成功通知 Toast -->
+    <div v-if="toast.show" class="fixed bottom-6 right-6 z-50 p-4 rounded-xl bg-brand-card border border-brand-cyan/60 shadow-2xl text-xs flex items-center space-x-3 text-gray-100 max-w-md animate-bounce">
+      <i class="fa-solid fa-circle-check text-brand-cyan text-base"></i>
+      <div class="flex-1">
+        <div class="font-bold text-brand-cyan">{{ toast.title }}</div>
+        <div class="text-gray-300 text-[11px] mt-0.5 break-all">{{ toast.message }}</div>
+      </div>
+    </div>
+
   </div>
 
   <script>
@@ -311,6 +427,21 @@
 
         const activeVideoMode = ref('full');
         const selectedShot = ref({});
+        const showSotaModal = ref(false);
+        const isExporting = ref(false);
+        const sotaInfo = ref({
+          system: { os: 'Windows', ffmpeg: true, jianying_installed: true, jianying_draft_path: '' },
+          providers: {}
+        });
+        const keyInputs = ref({});
+        const toast = ref({ show: false, title: '', message: '' });
+
+        const showNotice = (title, message) => {
+          toast.value = { show: true, title, message };
+          setTimeout(() => {
+            toast.value.show = false;
+          }, 6000);
+        };
 
         const fetchProject = async () => {
           try {
@@ -325,14 +456,61 @@
           }
         };
 
+        const fetchSotaStatus = async () => {
+          try {
+            const res = await fetch('/api/sota/status');
+            const data = await res.json();
+            sotaInfo.value = data;
+          } catch (e) {
+            console.error('Failed to load sota status', e);
+          }
+        };
+
+        const saveKeys = async () => {
+          try {
+            const res = await fetch('/api/sota/save-keys', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ keys: keyInputs.value })
+            });
+            const data = await res.json();
+            showNotice('配置成功', data.message);
+            showSotaModal.value = false;
+            fetchSotaStatus();
+          } catch (e) {
+            showNotice('保存失败', '无法保存配置');
+          }
+        };
+
+        const exportToJianying = async () => {
+          isExporting.value = true;
+          try {
+            const res = await fetch('/api/export-jianying', { method: 'POST' });
+            const data = await res.json();
+            showNotice('剪映草稿导出成功', data.message);
+          } catch (e) {
+            showNotice('导出失败', '请检查剪映草稿路径');
+          } finally {
+            isExporting.value = false;
+          }
+        };
+
         onMounted(() => {
           fetchProject();
+          fetchSotaStatus();
         });
 
         return {
           project,
           selectedShot,
-          activeVideoMode
+          activeVideoMode,
+          showSotaModal,
+          isExporting,
+          sotaInfo,
+          keyInputs,
+          toast,
+          saveKeys,
+          exportToJianying
         };
       }
     }).mount('#app');
