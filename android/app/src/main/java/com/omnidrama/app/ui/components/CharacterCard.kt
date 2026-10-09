@@ -6,9 +6,12 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.DeleteOutline
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -24,7 +27,9 @@ import com.omnidrama.app.ui.theme.*
 @Composable
 fun CharacterCard(
     character: CharacterItem,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onEdit: () -> Unit = {},
+    onDelete: () -> Unit = {}
 ) {
     Box(
         modifier = modifier
@@ -65,18 +70,27 @@ fun CharacterCard(
                         fontSize = 14.sp,
                         fontWeight = FontWeight.Bold
                     )
-                    Box(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(4.dp))
-                            .background(BorderDark)
-                            .padding(horizontal = 6.dp, vertical = 2.dp)
-                    ) {
-                        Text(
-                            text = character.role,
-                            color = AccentGold,
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Medium
-                        )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(4.dp))
+                                .background(BorderDark)
+                                .padding(horizontal = 6.dp, vertical = 2.dp)
+                        ) {
+                            Text(
+                                text = character.role,
+                                color = AccentGold,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(4.dp))
+                        IconButton(onClick = onEdit, modifier = Modifier.size(24.dp)) {
+                            Icon(imageVector = Icons.Default.Edit, contentDescription = "Edit", tint = BrandCyan, modifier = Modifier.size(14.dp))
+                        }
+                        IconButton(onClick = onDelete, modifier = Modifier.size(24.dp)) {
+                            Icon(imageVector = Icons.Default.DeleteOutline, contentDescription = "Delete", tint = AccentRose, modifier = Modifier.size(14.dp))
+                        }
                     }
                 }
 

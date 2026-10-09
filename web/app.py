@@ -35,11 +35,15 @@ async def serve_studio():
         return f.read()
 
 
-@app.get("/api/project")
-async def get_current_project():
-    """获取当前最新短剧项目的完整分镜、资产与视频成片信息."""
-    project_dir = OUTPUT_DIR / "至尊龙王归位"
-    shots_dir = project_dir / "shots"
+PROJECT_STATE_FILE = OUTPUT_DIR / "current_project.json"
+
+def _load_project_data() -> Dict[str, Any]:
+    if PROJECT_STATE_FILE.exists():
+        try:
+            with open(PROJECT_STATE_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            pass
 
     shots = [
         {
@@ -178,7 +182,7 @@ async def get_current_project():
         }
     ]
 
-    return {
+    initial_data = {
         "title": "至尊龙王归位",
         "genre": "都市战神爽文",
         "video_url": "/output/至尊龙王归位/至尊龙王归位_影视级成片.mp4",
@@ -193,6 +197,153 @@ async def get_current_project():
             {"track": "电影配乐轨 (BGM)", "status": "已卡点", "source": "战神觉醒史诗管弦交响"}
         ]
     }
+    _save_project_data(initial_data)
+    return initial_data
+
+
+def _save_project_data(data: Dict[str, Any]):
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    with open(PROJECT_STATE_FILE, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+
+
+@app.get("/api/project")
+async def get_current_project():
+    """获取当前最新短剧项目的完整分镜、资产与视频成片信息."""
+    return _load_project_data()
+
+
+class CharacterModel(BaseModel):
+    name: str
+    role: str = "重要角色"
+    voice: str = "云希 (磁性沉稳霸道)"
+    avatar: Optional[str] = ""
+    traits: Optional[str] = ""
+
+
+class GenerateScriptRequest(BaseModel):
+    title: str = "新短剧"
+    genre: str = "都市爽文"
+    novel_text: str
+
+
+@app.post("/api/project/generate")
+async def generate_script_endpoint(req: GenerateScriptRequest):
+    """根据输入小说文本自动拆解全新剧本与角色资产."""
+    try:
+        from omnidrama.core.director import DirectorAgent
+    except ImportError:
+        from core.director import DirectorAgent
+
+    agent = DirectorAgent()
+    proj = agent.breakdown_story_offline(req.novel_text, title=req.title, genre=req.genre)
+
+    chars_list = []
+    for c in proj.characters:
+        is_first = (c.name == proj.characters[0].name)
+        chars_list.append({
+            "name": c.name,
+            "role": "男一号 / 核心主角" if is_first else "主要人物",
+            "voice": "云希 (磁性沉稳霸道)" if c.gender == "male" else "晓晓 (尖酸刻薄/成熟女主)",
+            "avatar": "",
+            "traits": c.visual_tags
+        })
+
+    if not chars_list:
+        chars_list = [
+            {"name": "主角", "role": "男主", "voice": "云希 (磁性沉稳霸道)", "avatar": "", "traits": "冷峻青年，身手不凡"}
+        ]
+
+    shots_list = []
+    for s in proj.shots:
+        shots_list.append({
+            "id": s.shot_id,
+            "speaker": s.speaker,
+            "scale": s.shot_scale.value.upper(),
+            "motion": s.camera_motion.value.upper(),
+            "motion_name": "镜头推进" if "zoom_in" in s.camera_motion.value else "镜头横移",
+            "dialogue": s.dialogue,
+            "image": "",
+            "audio": "",
+            "sfx": "无"
+        })
+
+    new_data = {
+        "title": req.title,
+        "genre": req.genre,
+        "video_url": "",
+        "live_actor_video": "",
+        "srt_url": "",
+        "duration": float(len(shots_list) * 5.0),
+        "characters": chars_list,
+        "shots": shots_list,
+        "audio_tracks": [
+            {"track": "人声对白轨", "status": "已分配", "source": f"Edge-TTS 多角色 ({len(chars_list)} 位声线)"},
+            {"track": "拟音音效轨 (SFX)", "status": "待注入", "source": "影视级动作与环境音效"},
+            {"track": "电影配乐轨 (BGM)", "status": "待匹配", "source": f"{req.genre}交响配乐"}
+        ]
+    }
+    _save_project_data(new_data)
+    return new_data
+
+
+@app.post("/api/characters")
+async def add_character_endpoint(char: CharacterModel):
+    """新增或修改角色."""
+    data = _load_project_data()
+    existing = False
+    for c in data["characters"]:
+        if c["name"] == char.name:
+            c.update(char.dict())
+            existing = True
+            break
+    if not existing:
+        data["characters"].append(char.dict())
+    _save_project_data(data)
+    return {"status": "success", "message": f"角色【{char.name}】已成功入库", "characters": data["characters"]}
+
+
+@app.put("/api/characters/{name}")
+async def update_character_endpoint(name: str, char: CharacterModel):
+    """修改指定角色信息."""
+    data = _load_project_data()
+    updated = False
+    for i, c in enumerate(data["characters"]):
+        if c["name"] == name:
+            data["characters"][i] = char.dict()
+            updated = True
+            break
+    if not updated:
+        data["characters"].append(char.dict())
+    _save_project_data(data)
+    return {"status": "success", "characters": data["characters"]}
+
+
+@app.delete("/api/characters/{name}")
+async def delete_character_endpoint(name: str):
+    """删除指定角色."""
+    data = _load_project_data()
+    data["characters"] = [c for c in data["characters"] if c["name"] != name]
+    _save_project_data(data)
+    return {"status": "success", "message": f"角色【{name}】已删除", "characters": data["characters"]}
+
+
+@app.get("/api/voices")
+async def get_available_voices():
+    """获取系统支持的配音音色母带字典."""
+    return [
+        {"name": "云希 (磁性沉稳霸道)", "code": "zh-CN-YunxiNeural", "tag": "男霸总/战神", "gender": "male"},
+        {"name": "云健 (嚣张跋扈反派)", "code": "zh-CN-YunjianNeural", "tag": "纨绔恶少/挑衅", "gender": "male"},
+        {"name": "云扬 (热血青年男主)", "code": "zh-CN-YunyangNeural", "tag": "少年修仙/逆袭", "gender": "male"},
+        {"name": "云浩 (沉稳长辈/正剧)", "code": "zh-CN-YunhaoNeural", "tag": "长辈宗师/掌门", "gender": "male"},
+        {"name": "晓晓 (尖酸刻薄逼迫)", "code": "zh-CN-XiaoxiaoNeural", "tag": "刁难反派/贵妇", "gender": "female"},
+        {"name": "晓涵 (温柔清纯甜美)", "code": "zh-CN-XiaohanNeural", "tag": "豪门千金/白月光", "gender": "female"},
+        {"name": "晓梦 (傲娇泼辣独立)", "code": "zh-CN-XiaomengNeural", "tag": "冷艳师姐/女总裁", "gender": "female"},
+        {"name": "东北晓贝 (爽快大姐)", "code": "zh-CN-liaoning-XiaobeiNeural", "tag": "方言喜剧/生活", "gender": "female"},
+        {"name": "陕西晓妮 (豪爽淳朴)", "code": "zh-CN-shaanxi-XiaoniNeural", "tag": "西北风情/豪迈", "gender": "female"},
+        {"name": "Christopher (美语男主)", "code": "en-US-ChristopherNeural", "tag": "海外出海男主角", "gender": "male"},
+        {"name": "Jenny (美语女主)", "code": "en-US-JennyNeural", "tag": "海外出海女主角", "gender": "female"}
+    ]
 
 
 @app.get("/api/sota/status")

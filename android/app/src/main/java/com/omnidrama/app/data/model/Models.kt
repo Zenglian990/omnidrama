@@ -57,3 +57,10 @@ data class ProviderItem(
     val configured: Boolean,
     val tier: String
 )
+
+data class VoiceItem(
+    val name: String,
+    val code: String,
+    val tag: String,
+    val gender: String
+)

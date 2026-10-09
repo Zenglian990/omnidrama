@@ -69,6 +69,86 @@ class DramaRepository {
         return@withContext "导出完成"
     }
 
+    suspend fun addCharacter(baseUrl: String, character: CharacterItem): Boolean = withContext(Dispatchers.IO) {
+        try {
+            val json = gson.toJson(character)
+            val req = Request.Builder()
+                .url("$baseUrl/api/characters")
+                .post(json.toRequestBody("application/json".toMediaType()))
+                .build()
+            client.newCall(req).execute().use { resp ->
+                return@withContext resp.isSuccessful
+            }
+        } catch (e: Exception) {
+            return@withContext false
+        }
+    }
+
+    suspend fun deleteCharacter(baseUrl: String, name: String): Boolean = withContext(Dispatchers.IO) {
+        try {
+            val encodedName = java.net.URLEncoder.encode(name, "UTF-8")
+            val req = Request.Builder()
+                .url("$baseUrl/api/characters/$encodedName")
+                .delete()
+                .build()
+            client.newCall(req).execute().use { resp ->
+                return@withContext resp.isSuccessful
+            }
+        } catch (e: Exception) {
+            return@withContext false
+        }
+    }
+
+    suspend fun generateScript(baseUrl: String, title: String, genre: String, novelText: String): ProjectData? = withContext(Dispatchers.IO) {
+        try {
+            val payload = mapOf(
+                "title" to title,
+                "genre" to genre,
+                "novel_text" to novelText
+            )
+            val json = gson.toJson(payload)
+            val req = Request.Builder()
+                .url("$baseUrl/api/project/generate")
+                .post(json.toRequestBody("application/json".toMediaType()))
+                .build()
+            client.newCall(req).execute().use { resp ->
+                if (resp.isSuccessful) {
+                    val body = resp.body?.string()
+                    if (!body.isNullOrBlank()) {
+                        return@withContext gson.fromJson(body, ProjectData::class.java)
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            return@withContext null
+        }
+        return@withContext null
+    }
+
+    suspend fun getVoices(baseUrl: String): List<VoiceItem> = withContext(Dispatchers.IO) {
+        try {
+            val req = Request.Builder().url("$baseUrl/api/voices").build()
+            client.newCall(req).execute().use { resp ->
+                if (resp.isSuccessful) {
+                    val body = resp.body?.string()
+                    if (!body.isNullOrBlank()) {
+                        val type = object : com.google.gson.reflect.TypeToken<List<VoiceItem>>() {}.type
+                        return@withContext gson.fromJson(body, type)
+                    }
+                }
+            }
+        } catch (e: Exception) {
+        }
+        return@withContext listOf(
+            VoiceItem("云希 (磁性沉稳霸道)", "zh-CN-YunxiNeural", "男霸总/战神", "male"),
+            VoiceItem("云健 (嚣张跋扈反派)", "zh-CN-YunjianNeural", "纨绔恶少/挑衅", "male"),
+            VoiceItem("云扬 (热血青年男主)", "zh-CN-YunyangNeural", "少年修仙/逆袭", "male"),
+            VoiceItem("晓晓 (尖酸刻薄逼迫)", "zh-CN-XiaoxiaoNeural", "刁难反派/贵妇", "female"),
+            VoiceItem("晓涵 (温柔清纯甜美)", "zh-CN-XiaohanNeural", "豪门千金/白月光", "female"),
+            VoiceItem("晓梦 (傲娇泼辣独立)", "zh-CN-XiaomengNeural", "冷艳师姐/女总裁", "female")
+        )
+    }
+
     private fun getOfflineMockProject(): ProjectData {
         val shots = listOf(
             ShotItem(1, "旁白", "WIDE_SHOT", "ZOOM_IN", "镜头推进", "林家祖宅大堂，狂风骤雨拍打着雕花木窗。", "", "", "暴雨环境音"),

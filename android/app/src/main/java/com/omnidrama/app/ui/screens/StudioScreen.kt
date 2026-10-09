@@ -9,6 +9,8 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.ContentCut
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
@@ -23,8 +25,10 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.omnidrama.app.data.model.CharacterItem
 import com.omnidrama.app.data.model.ProjectData
 import com.omnidrama.app.data.model.SotaStatusResponse
+import com.omnidrama.app.data.model.VoiceItem
 import com.omnidrama.app.data.repository.DramaRepository
 import com.omnidrama.app.ui.components.*
 import com.omnidrama.app.ui.theme.*
@@ -36,9 +40,10 @@ fun StudioScreen() {
     val scope = rememberCoroutineScope()
     val repo = remember { DramaRepository() }
 
-    var serverUrl by remember { mutableStateOf("http://10.0.2.2:8765") }
+    var serverUrl by remember { mutableStateOf("https://eba55ed1b08c21.lhr.life") }
     var project by remember { mutableStateOf(ProjectData()) }
     var sotaInfo by remember { mutableStateOf(SotaStatusResponse()) }
+    var availableVoices by remember { mutableStateOf<List<VoiceItem>>(emptyList()) }
     var isLoading by remember { mutableStateOf(false) }
 
     var selectedTab by remember { mutableIntStateOf(0) } // 0: 监视器, 1: 分镜流, 2: 角色库
@@ -47,11 +52,17 @@ fun StudioScreen() {
     var showEpisodeDialog by remember { mutableStateOf(false) }
     var currentEpisodeTitle by remember { mutableStateOf("第 1 集：怒拔逆鳞") }
 
+    var showCharacterEditDialog by remember { mutableStateOf(false) }
+    var editingCharacter by remember { mutableStateOf<CharacterItem?>(null) }
+    var showGenerateScriptDialog by remember { mutableStateOf(false) }
+    var isGeneratingScript by remember { mutableStateOf(false) }
+
     fun refreshData() {
         scope.launch {
             isLoading = true
             project = repo.getProject(serverUrl)
             sotaInfo = repo.getSotaStatus(serverUrl)
+            availableVoices = repo.getVoices(serverUrl)
             isLoading = false
         }
     }
@@ -117,6 +128,14 @@ fun StudioScreen() {
                     }
 
                     Row(verticalAlignment = Alignment.CenterVertically) {
+                        IconButton(onClick = { showGenerateScriptDialog = true }) {
+                            Icon(
+                                imageVector = Icons.Default.AutoAwesome,
+                                contentDescription = "AI Generate Script",
+                                tint = AccentGold
+                            )
+                        }
+
                         IconButton(onClick = {
                             scope.launch {
                                 val msg = repo.exportJianying(serverUrl)
@@ -290,15 +309,54 @@ fun StudioScreen() {
                         verticalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
                         item {
-                            Text(
-                                text = "角色定妆资产库",
-                                color = BrandCyan,
-                                fontSize = 14.sp,
-                                fontWeight = FontWeight.Bold
-                            )
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column {
+                                    Text(
+                                        text = "角色定妆资产库 (${project.characters.size})",
+                                        color = BrandCyan,
+                                        fontSize = 14.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                    Text(
+                                        text = "自由增删 / 换声线 / 设定外貌Prompt",
+                                        color = TextMuted,
+                                        fontSize = 10.sp
+                                    )
+                                }
+                                Button(
+                                    onClick = {
+                                        editingCharacter = null
+                                        showCharacterEditDialog = true
+                                    },
+                                    colors = ButtonDefaults.buttonColors(containerColor = BrandCyan),
+                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                                    shape = RoundedCornerShape(8.dp)
+                                ) {
+                                    Icon(imageVector = Icons.Default.Add, contentDescription = null, tint = BgDark, modifier = Modifier.size(14.dp))
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("添加角色", color = BgDark, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                }
+                            }
                         }
                         items(project.characters) { char ->
-                            CharacterCard(character = char)
+                            CharacterCard(
+                                character = char,
+                                onEdit = {
+                                    editingCharacter = char
+                                    showCharacterEditDialog = true
+                                },
+                                onDelete = {
+                                    scope.launch {
+                                        repo.deleteCharacter(serverUrl, char.name)
+                                        project = project.copy(characters = project.characters.filter { it.name != char.name })
+                                        Toast.makeText(context, "已删除角色【${char.name}】", Toast.LENGTH_SHORT).show()
+                                    }
+                                }
+                            )
                         }
 
                         item {
@@ -336,6 +394,52 @@ fun StudioScreen() {
                 }
             }
         }
+    }
+
+    if (showCharacterEditDialog) {
+        CharacterEditDialog(
+            initialCharacter = editingCharacter,
+            availableVoices = availableVoices,
+            onSave = { savedChar ->
+                scope.launch {
+                    showCharacterEditDialog = false
+                    repo.addCharacter(serverUrl, savedChar)
+                    val updated = project.characters.toMutableList()
+                    val idx = updated.indexOfFirst { it.name == savedChar.name }
+                    if (idx >= 0) {
+                        updated[idx] = savedChar
+                    } else {
+                        updated.add(savedChar)
+                    }
+                    project = project.copy(characters = updated)
+                    Toast.makeText(context, "角色【${savedChar.name}】已成功入库！", Toast.LENGTH_SHORT).show()
+                }
+            },
+            onDismiss = { showCharacterEditDialog = false }
+        )
+    }
+
+    if (showGenerateScriptDialog) {
+        GenerateScriptDialog(
+            isGenerating = isGeneratingScript,
+            onGenerate = { t, g, text ->
+                scope.launch {
+                    isGeneratingScript = true
+                    val newProj = repo.generateScript(serverUrl, t, g, text)
+                    isGeneratingScript = false
+                    showGenerateScriptDialog = false
+                    if (newProj != null) {
+                        project = newProj
+                        currentEpisodeTitle = "第 1 集：分镜已就绪"
+                        Toast.makeText(context, "《${t}》全新剧目生成成功！提取了 ${newProj.characters.size} 位新角色", Toast.LENGTH_LONG).show()
+                    } else {
+                        Toast.makeText(context, "剧本拆解已提交，正在同步最新剧目...", Toast.LENGTH_SHORT).show()
+                        refreshData()
+                    }
+                }
+            },
+            onDismiss = { showGenerateScriptDialog = false }
+        )
     }
 
     if (showSotaDialog) {
