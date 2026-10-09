@@ -12,8 +12,14 @@ import java.util.concurrent.TimeUnit
 
 class DramaRepository {
     private val client = OkHttpClient.Builder()
-        .connectTimeout(5, TimeUnit.SECONDS)
-        .readTimeout(10, TimeUnit.SECONDS)
+        .connectTimeout(8, TimeUnit.SECONDS)
+        .readTimeout(15, TimeUnit.SECONDS)
+        .addInterceptor { chain ->
+            val newReq = chain.request().newBuilder()
+                .addHeader("Bypass-Tunnel-Reminder", "true")
+                .build()
+            chain.proceed(newReq)
+        }
         .build()
 
     private val gson = Gson()
