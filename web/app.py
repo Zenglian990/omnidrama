@@ -199,7 +199,10 @@ async def get_current_project():
 async def get_sota_status():
     """获取所有行业顶配大模型引擎的配置就绪状态与本地系统环境."""
     import shutil
-    from omnidrama.core.capcut_exporter import CapCutExporter
+    try:
+        from omnidrama.core.capcut_exporter import CapCutExporter
+    except ImportError:
+        from core.capcut_exporter import CapCutExporter
     
     jianying_path = CapCutExporter.get_system_jianying_draft_path()
 
@@ -302,7 +305,10 @@ async def save_api_keys(req: SaveKeysRequest):
 @app.post("/api/export-jianying")
 async def export_jianying_project():
     """将当前项目一键导出为系统剪映专业版原生草稿工程."""
-    from omnidrama.core.capcut_exporter import CapCutExporter
+    try:
+        from omnidrama.core.capcut_exporter import CapCutExporter
+    except ImportError:
+        from core.capcut_exporter import CapCutExporter
     
     project_data = await get_current_project()
     exporter = CapCutExporter(fps=24)
@@ -340,19 +346,25 @@ class SplitNovelRequest(BaseModel):
     chars_per_episode: Optional[int] = 600
 
 
+def _get_series_manager():
+    try:
+        from omnidrama.core.series_manager import SeriesManager
+    except ImportError:
+        from core.series_manager import SeriesManager
+    return SeriesManager()
+
+
 @app.get("/api/series")
 async def get_series_list():
     """获取所有剧目及分集连载信息."""
-    from omnidrama.core.series_manager import SeriesManager
-    mgr = SeriesManager()
+    mgr = _get_series_manager()
     return mgr.get_registry()
 
 
 @app.post("/api/series/episodes")
 async def add_episode_endpoint(req: AddEpisodeRequest):
     """向指定剧目新增一集分镜."""
-    from omnidrama.core.series_manager import SeriesManager
-    mgr = SeriesManager()
+    mgr = _get_series_manager()
     new_ep = mgr.add_episode(req.series_id, req.title, req.text or "")
     return {"status": "success", "episode": new_ep}
 
@@ -360,7 +372,6 @@ async def add_episode_endpoint(req: AddEpisodeRequest):
 @app.post("/api/series/split-novel")
 async def split_novel_endpoint(req: SplitNovelRequest):
     """智能长篇小说切集算法：自动分割为连续短剧集."""
-    from omnidrama.core.series_manager import SeriesManager
-    mgr = SeriesManager()
+    mgr = _get_series_manager()
     episodes = mgr.auto_split_novel(req.novel_text, req.chars_per_episode or 600)
     return {"status": "success", "count": len(episodes), "episodes": episodes}

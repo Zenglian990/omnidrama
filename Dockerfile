@@ -22,11 +22,7 @@ COPY . .
 # 暴露端口
 EXPOSE 8765
 
-ENV PYTHONPATH=/app
+ENV PYTHONPATH=/app:/app/omnidrama
 ENV PYTHONUNBUFFERED=1
 
-# 容器健康检查
-HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:8765/api/sota/status || exit 1
-
-CMD ["python", "-m", "uvicorn", "web.app:app", "--host", "0.0.0.0", "--port", "8765"]
+CMD ["sh", "-c", "python -m uvicorn web.app:app --host 0.0.0.0 --port ${PORT:-8765}"]
