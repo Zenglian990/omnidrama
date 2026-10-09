@@ -24,3 +24,13 @@ temp*
 # OS files
 .DS_Store
 Thumbs.db
+
+# Android Build Artifacts
+.gradle/
+**/build/
+android/.gradle/
+android/build/
+android/app/build/
+local.properties
+*.apk
+*.aab

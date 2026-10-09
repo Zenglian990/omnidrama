@@ -57,6 +57,25 @@ python -m uvicorn omnidrama.web.app:app --host 127.0.0.1 --port 8765
 
 ---
 
+## 📱 原生安卓客户端 (Native Android App)
+
+OmniDrama 官方配备了专为移动端打造的 **原生 Android 掌上导演室**，基于 **Kotlin + Jetpack Compose + Media3 (ExoPlayer)**：
+
+- **源码目录**：`android/`
+- **核心能力**：
+  - 院线级 9:16 竖屏播放器，无缝切换电影成片与真人演员活化。
+  - 掌上全景分镜卡片流，随时点播任一分镜对白与镜头调度。
+  - SOTA 六大顶配大模型控制台与服务地址动态切换。
+  - 手机远程一键触发桌面端注入剪映草稿。
+- **一键编译与安装**：
+  ```bash
+  cd android
+  ./gradlew assembleDebug
+  # 生成 APK: android/app/build/outputs/apk/debug/app-debug.apk
+  ```
+
+---
+
 ## 🚀 命令行快速出片 (CLI)
 
 ```bash
