@@ -327,3 +327,40 @@ async def export_jianying_project():
         "draft_path": draft_path,
         "message": f"成功导出！请直接在剪映中打开工程：{draft_path}"
     }
+
+
+class AddEpisodeRequest(BaseModel):
+    series_id: str
+    title: str
+    text: Optional[str] = ""
+
+
+class SplitNovelRequest(BaseModel):
+    novel_text: str
+    chars_per_episode: Optional[int] = 600
+
+
+@app.get("/api/series")
+async def get_series_list():
+    """获取所有剧目及分集连载信息."""
+    from omnidrama.core.series_manager import SeriesManager
+    mgr = SeriesManager()
+    return mgr.get_registry()
+
+
+@app.post("/api/series/episodes")
+async def add_episode_endpoint(req: AddEpisodeRequest):
+    """向指定剧目新增一集分镜."""
+    from omnidrama.core.series_manager import SeriesManager
+    mgr = SeriesManager()
+    new_ep = mgr.add_episode(req.series_id, req.title, req.text or "")
+    return {"status": "success", "episode": new_ep}
+
+
+@app.post("/api/series/split-novel")
+async def split_novel_endpoint(req: SplitNovelRequest):
+    """智能长篇小说切集算法：自动分割为连续短剧集."""
+    from omnidrama.core.series_manager import SeriesManager
+    mgr = SeriesManager()
+    episodes = mgr.auto_split_novel(req.novel_text, req.chars_per_episode or 600)
+    return {"status": "success", "count": len(episodes), "episodes": episodes}

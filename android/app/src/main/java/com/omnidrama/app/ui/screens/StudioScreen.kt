@@ -44,6 +44,8 @@ fun StudioScreen() {
     var selectedTab by remember { mutableIntStateOf(0) } // 0: 监视器, 1: 分镜流, 2: 角色库
     var activeVideoMode by remember { mutableStateOf("full") } // "full" or "live"
     var showSotaDialog by remember { mutableStateOf(false) }
+    var showEpisodeDialog by remember { mutableStateOf(false) }
+    var currentEpisodeTitle by remember { mutableStateOf("第 1 集：怒拔逆鳞") }
 
     fun refreshData() {
         scope.launch {
@@ -90,11 +92,27 @@ fun StudioScreen() {
                                 fontSize = 16.sp,
                                 fontWeight = FontWeight.Bold
                             )
-                            Text(
-                                text = "《${project.title}》",
-                                color = TextSecondary,
-                                fontSize = 10.sp
-                            )
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    text = "《${project.title}》",
+                                    color = TextSecondary,
+                                    fontSize = 10.sp
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(4.dp))
+                                        .background(BorderDark)
+                                        .padding(horizontal = 4.dp, vertical = 1.dp)
+                                ) {
+                                    Text(
+                                        text = currentEpisodeTitle,
+                                        color = AccentGold,
+                                        fontSize = 9.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            }
                         }
                     }
 

@@ -64,33 +64,55 @@
           <span class="font-bold text-lg tracking-wider bg-gradient-to-r from-brand-cyan to-purple-400 bg-clip-text text-transparent">
             OmniDrama
           </span>
-          <span class="text-xs text-gray-400 ml-2 px-2 py-0.5 rounded bg-brand-border">灵眸漫剧工作台 v1.0</span>
+          <span class="text-xs text-gray-400 ml-2 px-2 py-0.5 rounded bg-brand-border">灵眸漫剧工作台 v2.0</span>
         </div>
       </div>
 
-      <!-- 中间项目状态 -->
-      <div class="flex items-center space-x-6 text-sm">
+      <!-- 中间项目与连载剧集状态 -->
+      <div class="flex items-center space-x-4 text-sm">
         <div class="flex items-center space-x-2">
           <span class="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse"></span>
-          <span class="text-gray-300">当前项目:</span>
-          <span class="font-semibold text-brand-cyan">《{{ project.title }}》</span>
+          <span class="text-gray-300">{{ t('current_series') }}:</span>
+          <span class="font-semibold text-brand-cyan">《{{ activeSeries.title || project.title }}》</span>
+        </div>
+
+        <!-- 连载分集下拉快捷入口 -->
+        <button 
+          @click="showEpisodeModal = true"
+          class="px-2.5 py-1 rounded-lg bg-brand-card hover:bg-brand-border border border-brand-border text-xs text-amber-300 flex items-center space-x-1.5 transition shadow"
+        >
+          <i class="fa-solid fa-list-ol text-amber-400"></i>
+          <span>{{ currentEpisode.title || '第 1 集' }}</span>
+          <i class="fa-solid fa-chevron-down text-[10px] text-gray-400 ml-1"></i>
+        </button>
+
+        <div class="text-xs text-gray-400">
+          <i class="fa-solid fa-film text-purple-400 mr-1"></i> {{ project.shots.length }} {{ t('shots') }}
         </div>
         <div class="text-xs text-gray-400">
-          <i class="fa-solid fa-film text-purple-400 mr-1"></i> 分镜: {{ project.shots.length }} 镜
-        </div>
-        <div class="text-xs text-gray-400">
-          <i class="fa-solid fa-clock text-amber-400 mr-1"></i> 总长: {{ project.duration }}s
+          <i class="fa-solid fa-clock text-amber-400 mr-1"></i> {{ project.duration }}s
         </div>
       </div>
 
-      <!-- 右侧操作 -->
+      <!-- 右侧操作与语言切换 -->
       <div class="flex items-center space-x-2.5">
+        <!-- 国际化语言切换器 (i18n) -->
+        <select 
+          v-model="currentLang" 
+          class="bg-brand-card text-xs text-gray-200 border border-brand-border rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-brand-cyan transition"
+        >
+          <option value="zh">🇨🇳 简体中文</option>
+          <option value="en">🇺🇸 English</option>
+          <option value="ja">🇯🇵 日本語</option>
+          <option value="ko">🇰🇷 한국어</option>
+        </select>
+
         <button 
           @click="showSotaModal = true" 
           class="px-3 py-1.5 rounded-lg bg-gradient-to-r from-purple-900/60 to-pink-900/60 hover:from-purple-800 hover:to-pink-800 border border-purple-500/40 text-purple-200 text-xs font-semibold transition flex items-center space-x-1.5 shadow"
         >
           <i class="fa-solid fa-microchip text-pink-400"></i>
-          <span>SOTA 顶配大模型引擎</span>
+          <span>{{ t('sota_engine') }}</span>
         </button>
 
         <button 
@@ -99,12 +121,12 @@
           class="px-3.5 py-1.5 rounded-lg bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-black font-bold text-xs transition flex items-center space-x-1.5 shadow-lg shadow-orange-500/20 disabled:opacity-50"
         >
           <i class="fa-solid fa-scissors"></i>
-          <span>{{ isExporting ? '正在注入...' : '一键注入剪映草稿' }}</span>
+          <span>{{ isExporting ? t('exporting') : t('export_capcut') }}</span>
         </button>
 
         <a :href="project.video_url" download class="px-3.5 py-1.5 rounded-lg bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-black font-semibold text-xs transition flex items-center space-x-1.5 shadow-lg shadow-cyan-500/20">
           <i class="fa-solid fa-download"></i>
-          <span>下载成片</span>
+          <span>{{ t('download_film') }}</span>
         </a>
       </div>
     </header>
@@ -398,6 +420,125 @@
       </div>
     </div>
 
+    <!-- 连载剧集与小说切集管理 Modal (Episode Manager) -->
+    <div v-if="showEpisodeModal" class="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+      <div class="w-full max-w-2xl bg-brand-card border border-brand-border rounded-2xl shadow-2xl flex flex-col max-h-[85vh] overflow-hidden">
+        
+        <!-- Modal 头部 -->
+        <div class="px-6 py-4 border-b border-brand-border flex items-center justify-between bg-brand-dark">
+          <div class="flex items-center space-x-2.5">
+            <div class="w-7 h-7 rounded-lg bg-amber-500/20 text-amber-400 flex items-center justify-center font-bold">
+              <i class="fa-solid fa-film text-sm"></i>
+            </div>
+            <div>
+              <h3 class="font-bold text-sm text-gray-100">{{ t('episode_mgr') }}</h3>
+              <p class="text-[11px] text-gray-400">{{ t('episode_sub') }}</p>
+            </div>
+          </div>
+          <button @click="showEpisodeModal = false" class="text-gray-400 hover:text-white transition">
+            <i class="fa-solid fa-xmark text-lg"></i>
+          </button>
+        </div>
+
+        <!-- 剧集列表与切集 -->
+        <div class="p-6 overflow-y-auto space-y-4">
+          
+          <!-- 连续剧基本信息卡 -->
+          <div class="p-3.5 rounded-xl bg-brand-dark/70 border border-brand-border flex items-center justify-between">
+            <div>
+              <div class="flex items-center space-x-2">
+                <span class="font-bold text-sm text-brand-cyan">《{{ activeSeries.title }}》</span>
+                <span class="text-[10px] px-2 py-0.5 rounded bg-brand-border text-amber-300">{{ activeSeries.genre }}</span>
+              </div>
+              <p class="text-[11px] text-gray-400 mt-1">{{ activeSeries.synopsis }}</p>
+            </div>
+            <button 
+              @click="showSplitInput = !showSplitInput"
+              class="px-3 py-1.5 rounded-lg bg-purple-950 hover:bg-purple-900 border border-purple-800 text-purple-300 text-xs font-semibold transition flex items-center space-x-1"
+            >
+              <i class="fa-solid fa-book-open"></i>
+              <span>{{ t('auto_split') }}</span>
+            </button>
+          </div>
+
+          <!-- 长篇小说智能切集输入框 -->
+          <div v-if="showSplitInput" class="p-4 rounded-xl bg-brand-dark border border-purple-500/40 space-y-3">
+            <div class="flex justify-between items-center text-xs text-gray-300">
+              <span class="font-bold text-purple-300">粘贴长篇小说/短文内容（系统将按章节与戏剧冲突自动切集）：</span>
+              <span class="text-gray-500 text-[11px]">单集建议 500-800 字</span>
+            </div>
+            <textarea 
+              v-model="novelText" 
+              rows="4" 
+              placeholder="在此粘贴小说正文..."
+              class="w-full bg-brand-card border border-brand-border rounded-lg p-2.5 text-xs text-gray-200 focus:outline-none focus:border-brand-cyan"
+            ></textarea>
+            <div class="flex justify-end space-x-2">
+              <button @click="showSplitInput = false" class="px-3 py-1 rounded text-xs text-gray-400">取消</button>
+              <button @click="autoSplitNovel" class="px-4 py-1.5 rounded-lg bg-gradient-to-r from-purple-600 to-pink-600 text-white text-xs font-bold shadow">
+                {{ t('split_btn') }}
+              </button>
+            </div>
+          </div>
+
+          <!-- 分集列表 -->
+          <div class="space-y-2.5">
+            <div 
+              v-for="ep in activeSeries.episodes" 
+              :key="ep.id"
+              @click="switchEpisode(ep)"
+              :class="{'border-amber-400 ring-1 ring-amber-400/40': currentEpisode.id === ep.id}"
+              class="p-3 rounded-xl bg-brand-card border border-brand-border hover:border-gray-500 transition flex items-center justify-between cursor-pointer"
+            >
+              <div class="flex items-center space-x-3">
+                <span class="w-8 h-8 rounded-lg bg-brand-dark border border-gray-700 flex items-center justify-center font-bold text-xs text-amber-300 font-mono">
+                  #{{ ep.episode_num }}
+                </span>
+                <div>
+                  <div class="font-bold text-xs text-gray-200">{{ ep.title }}</div>
+                  <div class="text-[11px] text-gray-400 mt-0.5">
+                    {{ ep.shots_count }} 镜 · {{ ep.duration }}s
+                  </div>
+                </div>
+              </div>
+
+              <div class="flex items-center space-x-2">
+                <span 
+                  :class="{
+                    'bg-emerald-950 text-emerald-400 border-emerald-800': ep.status === 'COMPLETED',
+                    'bg-purple-950 text-purple-300 border-purple-800': ep.status === 'STORYBOARD',
+                    'bg-gray-800 text-gray-400 border-gray-700': ep.status === 'DRAFT'
+                  }"
+                  class="text-[10px] px-2 py-0.5 rounded border"
+                >
+                  {{ ep.status === 'COMPLETED' ? t('status_completed') : (ep.status === 'STORYBOARD' ? t('status_storyboard') : t('status_draft')) }}
+                </span>
+                <i v-if="currentEpisode.id === ep.id" class="fa-solid fa-check text-brand-cyan text-xs ml-1"></i>
+              </div>
+            </div>
+          </div>
+
+          <!-- 新增分集快捷栏 -->
+          <div class="pt-2 flex items-center space-x-2">
+            <input 
+              type="text" 
+              v-model="newEpisodeTitle" 
+              placeholder="输入新分集标题，如：第 4 集：北境狼烟..." 
+              class="flex-1 bg-brand-card border border-brand-border rounded-lg px-3 py-1.5 text-xs text-gray-200 focus:outline-none focus:border-brand-cyan"
+            >
+            <button 
+              @click="addNewEpisode"
+              class="px-4 py-1.5 rounded-lg bg-gradient-to-r from-amber-500 to-orange-500 text-black font-bold text-xs shadow"
+            >
+              {{ t('add_episode') }}
+            </button>
+          </div>
+
+        </div>
+
+      </div>
+    </div>
+
     <!-- 成功通知 Toast -->
     <div v-if="toast.show" class="fixed bottom-6 right-6 z-50 p-4 rounded-xl bg-brand-card border border-brand-cyan/60 shadow-2xl text-xs flex items-center space-x-3 text-gray-100 max-w-md animate-bounce">
       <i class="fa-solid fa-circle-check text-brand-cyan text-base"></i>
@@ -412,8 +553,131 @@
   <script>
     const { createApp, ref, onMounted } = Vue;
 
+    // 国际化多语言翻译字典 (i18n)
+    const i18n = {
+      zh: {
+        current_series: "当前连续剧",
+        shots: "镜",
+        sota_engine: "SOTA 顶配大模型引擎",
+        export_capcut: "一键注入剪映草稿",
+        exporting: "正在注入...",
+        download_film: "下载成片",
+        character_vault: "角色定妆资产卡",
+        actors_count: "位出场",
+        triple_audio: "三轨合一电影混音",
+        storyboard_flow: "全景分镜列表",
+        storyboard_sub: "点击任意分镜可在右侧立即试听与检查",
+        master_player: "院线级主监视器",
+        full_movie_mode: "全片 61s 电影级成片",
+        live_actor_mode: "🔥 真人演员活化 (口型+眨眼)",
+        resolution: "分辨率",
+        duration: "总时长",
+        sound_system: "声音系统",
+        camera_engine: "运镜渲染",
+        export_film_btn: "立即导出成片 MP4",
+        episode_mgr: "多剧集连载管理",
+        episode_sub: "长篇连续剧 · 跨集角色锁脸 · 自动切集",
+        add_episode: "+ 新增分集",
+        auto_split: "📖 智能小说长篇切集",
+        status_completed: "已完结",
+        status_storyboard: "分镜中",
+        status_draft: "草稿",
+        split_btn: "开始切集"
+      },
+      en: {
+        current_series: "Series",
+        shots: "Shots",
+        sota_engine: "SOTA Hollywood Suite",
+        export_capcut: "Export to CapCut Draft",
+        exporting: "Injecting...",
+        download_film: "Download Film",
+        character_vault: "Character Vault",
+        actors_count: "Cast",
+        triple_audio: "Triple-Track Foley Audio",
+        storyboard_flow: "Storyboard Flow",
+        storyboard_sub: "Click any shot to audition and inspect camera blocking",
+        master_player: "Master Cinema Monitor",
+        full_movie_mode: "Full Episode (61s Master)",
+        live_actor_mode: "🔥 Neural Actor (LipSync + Eyes)",
+        resolution: "Resolution",
+        duration: "Duration",
+        sound_system: "Audio Master",
+        camera_engine: "Camera Motion",
+        export_film_btn: "Export Master MP4",
+        episode_mgr: "Multi-Episode Series Manager",
+        episode_sub: "Series Continuity · Cross-Episode Character Lock · Auto-Chunking",
+        add_episode: "+ New Episode",
+        auto_split: "📖 Auto-Split Novel",
+        status_completed: "Completed",
+        status_storyboard: "Storyboard",
+        status_draft: "Draft",
+        split_btn: "Split Chapters"
+      },
+      ja: {
+        current_series: "連載ドラマ",
+        shots: "カット",
+        sota_engine: "SOTA 映画級AIエンジン",
+        export_capcut: "CapCut下書きへ出力",
+        exporting: "出力中...",
+        download_film: "本編ダウンロード",
+        character_vault: "キャラクター原画台帳",
+        actors_count: "名出演",
+        triple_audio: "3トラック映画音響ミキサー",
+        storyboard_flow: "絵コンテ・カット一覧",
+        storyboard_sub: "クリックして試聴およびカメラワーク確認",
+        master_player: "マスターシアターモニター",
+        full_movie_mode: "本編 61s 映画完成版",
+        live_actor_mode: "🔥 実写化AI (口パク+瞬き)",
+        resolution: "解像度",
+        duration: "総尺",
+        sound_system: "音響システム",
+        camera_engine: "カメラ演出",
+        export_film_btn: "本編MP4を出力",
+        episode_mgr: "連載エピソード管理",
+        episode_sub: "連続ドラマ · 顔一致固定 · 小説自動話数分割",
+        add_episode: "+ エピソード追加",
+        auto_split: "📖 小説自動分割",
+        status_completed: "完成",
+        status_storyboard: "絵コンテ中",
+        status_draft: "下書き",
+        split_btn: "分割開始"
+      },
+      ko: {
+        current_series: "시리즈 드라마",
+        shots: "컷",
+        sota_engine: "SOTA 시네마 엔진",
+        export_capcut: "CapCut 초안 내보내기",
+        exporting: "내보내는 중...",
+        download_film: "완성본 다운로드",
+        character_vault: "캐릭터 원화 보관함",
+        actors_count: "명 출연",
+        triple_audio: "트리플 트랙 폴리 오디오",
+        storyboard_flow: "스토리보드 컷 목록",
+        storyboard_sub: "클릭하여 대사 청취 및 연출 확인",
+        master_player: "마스터 시네마 모니터",
+        full_movie_mode: "전편 61s 영화 완성본",
+        live_actor_mode: "🔥 실사화 AI (립싱크+눈깜빡임)",
+        resolution: "해상도",
+        duration: "총 시간",
+        sound_system: "오디오 마스터",
+        camera_engine: "카메라 연출",
+        export_film_btn: "본편 MP4 내보내기",
+        episode_mgr: "연재 에피소드 관리",
+        episode_sub: "연속극 · 캐릭터 일관성 고정 · 소설 자동 챕터 분할",
+        add_episode: "+ 에피소드 추가",
+        auto_split: "📖 소설 자동 분할",
+        status_completed: "완성",
+        status_storyboard: "콘티 제작중",
+        status_draft: "초안",
+        split_btn: "분할 실행"
+      }
+    };
+
     createApp({
       setup() {
+        const currentLang = ref('zh');
+        const t = (key) => (i18n[currentLang.value] && i18n[currentLang.value][key]) || key;
+
         const project = ref({
           title: "至尊龙王归位",
           genre: "都市战神爽文",
@@ -424,6 +688,20 @@
           shots: [],
           audio_tracks: []
         });
+
+        // 连载剧集状态
+        const activeSeries = ref({
+          id: "series_longwang",
+          title: "至尊龙王归位",
+          genre: "都市战神爽文",
+          synopsis: "三年前至尊龙王退隐都市，入赘林家受尽冷眼；三年后逆鳞触动，十万战神破门叩首！",
+          episodes: []
+        });
+        const currentEpisode = ref({});
+        const showEpisodeModal = ref(false);
+        const showSplitInput = ref(false);
+        const novelText = ref('');
+        const newEpisodeTitle = ref('');
 
         const activeVideoMode = ref('full');
         const selectedShot = ref({});
@@ -453,6 +731,65 @@
             }
           } catch (e) {
             console.error('Failed to load project', e);
+          }
+        };
+
+        const fetchSeries = async () => {
+          try {
+            const res = await fetch('/api/series');
+            const data = await res.json();
+            if (data.series && data.series.length > 0) {
+              activeSeries.value = data.series[0];
+              if (activeSeries.value.episodes && activeSeries.value.episodes.length > 0) {
+                currentEpisode.value = activeSeries.value.episodes[0];
+              }
+            }
+          } catch (e) {
+            console.error('Failed to load series', e);
+          }
+        };
+
+        const switchEpisode = (ep) => {
+          currentEpisode.value = ep;
+          showNotice('切换剧集', `已进入 ${ep.title}`);
+          showEpisodeModal.value = false;
+        };
+
+        const addNewEpisode = async () => {
+          if (!newEpisodeTitle.value.trim()) return;
+          try {
+            const res = await fetch('/api/series/episodes', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                series_id: activeSeries.value.id,
+                title: newEpisodeTitle.value.trim()
+              })
+            });
+            const data = await res.json();
+            showNotice('新增成功', `已创建 ${data.episode.title}`);
+            newEpisodeTitle.value = '';
+            fetchSeries();
+          } catch (e) {
+            showNotice('新增失败', '无法添加分集');
+          }
+        };
+
+        const autoSplitNovel = async () => {
+          if (!novelText.value.trim()) return;
+          try {
+            const res = await fetch('/api/series/split-novel', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ novel_text: novelText.value.trim() })
+            });
+            const data = await res.json();
+            showNotice('切集成功', `智能小说切集完成，共拆分出 ${data.count} 集连载剧！`);
+            showSplitInput.value = false;
+            novelText.value = '';
+            fetchSeries();
+          } catch (e) {
+            showNotice('切集失败', '解析小说失败');
           }
         };
 
@@ -497,11 +834,23 @@
 
         onMounted(() => {
           fetchProject();
+          fetchSeries();
           fetchSotaStatus();
         });
 
         return {
+          currentLang,
+          t,
           project,
+          activeSeries,
+          currentEpisode,
+          showEpisodeModal,
+          showSplitInput,
+          novelText,
+          newEpisodeTitle,
+          switchEpisode,
+          addNewEpisode,
+          autoSplitNovel,
           selectedShot,
           activeVideoMode,
           showSotaModal,
