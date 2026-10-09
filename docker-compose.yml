@@ -1,0 +1,16 @@
+version: '3.8'
+
+services:
+  omnidrama-backend:
+    build: .
+    image: omnidrama-backend:latest
+    container_name: omnidrama_server
+    restart: unless-stopped
+    ports:
+      - "8765:8765"
+    volumes:
+      - ./output:/app/output
+      - ./config:/app/config
+      - ./.env:/app/.env
+    environment:
+      - PYTHONUNBUFFERED=1
