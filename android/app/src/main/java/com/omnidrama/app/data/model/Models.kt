@@ -64,3 +64,15 @@ data class VoiceItem(
     val tag: String,
     val gender: String
 )
+
+data class RenderStatusResponse(
+    val is_rendering: Boolean = false,
+    val progress: Int = 0,
+    val step_index: Int = 0,
+    val total_steps: Int = 5,
+    val current_step: String = "就绪",
+    val logs: List<String> = emptyList(),
+    val video_url: String = "",
+    val error: String? = null
+)
+

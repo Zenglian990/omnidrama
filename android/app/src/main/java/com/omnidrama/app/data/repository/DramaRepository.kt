@@ -131,6 +131,38 @@ class DramaRepository {
         return@withContext null
     }
 
+    suspend fun triggerRender(baseUrl: String, title: String = "", genre: String = ""): Boolean = withContext(Dispatchers.IO) {
+        try {
+            val payload = mapOf("title" to title, "genre" to genre)
+            val json = gson.toJson(payload)
+            val req = Request.Builder()
+                .url("$baseUrl/api/project/render")
+                .post(json.toRequestBody("application/json".toMediaType()))
+                .build()
+            client.newCall(req).execute().use { resp ->
+                return@withContext resp.isSuccessful
+            }
+        } catch (e: Exception) {
+            return@withContext false
+        }
+    }
+
+    suspend fun getRenderStatus(baseUrl: String): RenderStatusResponse? = withContext(Dispatchers.IO) {
+        try {
+            val req = Request.Builder().url("$baseUrl/api/project/render-status").build()
+            client.newCall(req).execute().use { resp ->
+                if (resp.isSuccessful) {
+                    val body = resp.body?.string()
+                    if (!body.isNullOrBlank()) {
+                        return@withContext gson.fromJson(body, RenderStatusResponse::class.java)
+                    }
+                }
+            }
+        } catch (e: Exception) {
+        }
+        return@withContext null
+    }
+
     suspend fun getVoices(baseUrl: String): List<VoiceItem> = withContext(Dispatchers.IO) {
         try {
             val req = Request.Builder().url("$baseUrl/api/voices").build()
@@ -157,21 +189,21 @@ class DramaRepository {
 
     private fun getOfflineMockProject(): ProjectData {
         val shots = listOf(
-            ShotItem(1, "旁白", "WIDE_SHOT", "ZOOM_IN", "镜头推进", "林家祖宅大堂，狂风骤雨拍打着雕花木窗。", "", "", "暴雨环境音"),
-            ShotItem(2, "岳母柳琴", "MEDIUM_SHOT", "PAN_LEFT", "向左横移", "叶辰，入赘三年，今日若拿不出三千万，就立刻滚出林家！", "", "", "无"),
-            ShotItem(3, "旁白", "CLOSE_UP", "ZOOM_IN", "镜头推进", "叶辰神色淡然，深邃的双眸中隐现寒光。", "", "", "无"),
-            ShotItem(4, "叶辰", "CLOSE_UP", "ZOOM_IN", "镜头推进", "三千万？当年若非我暗中相助，林家早在三年前就已灰飞烟灭！", "", "", "疾风起势 (Whoosh)"),
-            ShotItem(5, "赵公子", "MEDIUM_SHOT", "ZOOM_OUT", "镜头拉远", "哈哈哈！大言不惭的废物，也不撒泡尿照照自己是个什么东西！", "", "", "无"),
-            ShotItem(6, "旁白", "FULL_SHOT", "SHAKE", "镜头震撼", "突然，天地间惊雷滚滚，整座大堂剧烈震颤！", "", "", "惊雷劈裂 (Thunder)"),
-            ShotItem(7, "旁白", "FULL_SHOT", "ZOOM_OUT", "镜头拉远", "大门轰然破碎，十八位身披黑金战铠的修罗战神破门而入！", "", "", "重低音轰鸣 (Impact)"),
-            ShotItem(8, "修罗战神", "CLOSE_UP", "ZOOM_IN", "镜头推进", "恭迎龙王回归！十万修罗殿众将，随时听候调遣！", "", "", "金铁下跪 (Armor)"),
-            ShotItem(9, "岳母与赵公子", "MEDIUM_SHOT", "SHAKE", "镜头震撼", "龙……龙王？！你竟然是那位镇守北境的至尊龙王！", "", "", "无"),
-            ShotItem(10, "叶辰", "EXTREME_CLOSE_UP", "ZOOM_IN", "镜头推进", "犯我逆鳞者，杀无赦！", "", "", "终极大爆炸 (Impact)")
+            ShotItem(1, "旁白", "WIDE_SHOT", "ZOOM_IN", "镜头推进", "林家祖宅大堂，狂风骤雨拍打着雕花木窗。", "/api/shots/1/image", "/api/shots/1/audio", "暴雨环境音"),
+            ShotItem(2, "岳母柳琴", "MEDIUM_SHOT", "PAN_LEFT", "向左横移", "叶辰，入赘三年，今日若拿不出三千万，就立刻滚出林家！", "/api/shots/2/image", "/api/shots/2/audio", "无"),
+            ShotItem(3, "旁白", "CLOSE_UP", "ZOOM_IN", "镜头推进", "叶辰神色淡然，深邃的双眸中隐现寒光。", "/api/shots/3/image", "/api/shots/3/audio", "无"),
+            ShotItem(4, "叶辰", "CLOSE_UP", "ZOOM_IN", "镜头推进", "三千万？当年若非我暗中相助，林家早在三年前就已灰飞烟灭！", "/api/shots/4/image", "/api/shots/4/audio", "疾风起势 (Whoosh)"),
+            ShotItem(5, "赵公子", "MEDIUM_SHOT", "ZOOM_OUT", "镜头拉远", "哈哈哈！大言不惭的废物，也不撒泡尿照照自己是个什么东西！", "/api/shots/5/image", "/api/shots/5/audio", "无"),
+            ShotItem(6, "旁白", "FULL_SHOT", "SHAKE", "镜头震撼", "突然，天地间惊雷滚滚，整座大堂剧烈震颤！", "/api/shots/6/image", "/api/shots/6/audio", "惊雷劈裂 (Thunder)"),
+            ShotItem(7, "旁白", "FULL_SHOT", "ZOOM_OUT", "镜头拉远", "大门轰然破碎，十八位身披黑金战铠的修罗战神破门而入！", "/api/shots/7/image", "/api/shots/7/audio", "重低音轰鸣 (Impact)"),
+            ShotItem(8, "修罗战神", "CLOSE_UP", "ZOOM_IN", "镜头推进", "恭迎龙王回归！十万修罗殿众将，随时听候调遣！", "/api/shots/8/image", "/api/shots/8/audio", "金铁下跪 (Armor)"),
+            ShotItem(9, "岳母与赵公子", "MEDIUM_SHOT", "SHAKE", "镜头震撼", "龙……龙王？！你竟然是那位镇守北境的至尊龙王！", "/api/shots/9/image", "/api/shots/9/audio", "无"),
+            ShotItem(10, "叶辰", "EXTREME_CLOSE_UP", "ZOOM_IN", "镜头推进", "犯我逆鳞者，杀无赦！", "/api/shots/10/image", "/api/shots/10/audio", "终极大爆炸 (Impact)")
         )
         val chars = listOf(
-            CharacterItem("叶辰 (主角)", "至尊龙王", "云希 (磁性沉稳霸道)", "", "黑发冷眸，修罗战神之主，隐藏滔天权势"),
-            CharacterItem("岳母柳琴", "刁难反派", "晓晓 (尖酸刻薄逼迫)", "", "翡翠旗袍，拜金势力，豪门大堂"),
-            CharacterItem("赵公子", "狂妄对手", "云健 (嚣张跋扈)", "", "定制西装，手持红酒，自傲恶少")
+            CharacterItem("叶辰 (主角)", "至尊龙王", "云希 (磁性沉稳霸道)", "/api/shots/4/image", "黑发冷眸，修罗战神之主，隐藏滔天权势"),
+            CharacterItem("岳母柳琴", "刁难反派", "晓晓 (尖酸刻薄逼迫)", "/api/shots/2/image", "翡翠旗袍，拜金势力，豪门大堂"),
+            CharacterItem("赵公子", "狂妄对手", "云健 (嚣张跋扈)", "/api/shots/5/image", "定制西装，手持红酒，自傲恶少")
         )
         val tracks = listOf(
             AudioTrackItem("人声对白轨", "已对齐", "Edge-TTS 神经网络多音色"),
@@ -181,6 +213,8 @@ class DramaRepository {
         return ProjectData(
             title = "至尊龙王归位",
             genre = "都市战神爽文",
+            video_url = "/api/video/stream?mode=full",
+            live_actor_video = "/api/video/stream?mode=live",
             duration = 61.61,
             characters = chars,
             shots = shots,

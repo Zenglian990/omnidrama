@@ -11,13 +11,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.ArrowDropDown
-import androidx.compose.material.icons.filled.AutoAwesome
-import androidx.compose.material.icons.filled.ContentCut
-import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -49,6 +43,7 @@ fun StudioScreen() {
     var sotaInfo by remember { mutableStateOf(SotaStatusResponse()) }
     var availableVoices by remember { mutableStateOf<List<VoiceItem>>(emptyList()) }
     var isLoading by remember { mutableStateOf(false) }
+    var isOnline by remember { mutableStateOf(false) }
 
     var selectedTab by remember { mutableIntStateOf(0) } // 0: 监视器, 1: 分镜流, 2: 角色库
     var activeVideoMode by remember { mutableStateOf("full") } // "full" or "live"
@@ -56,6 +51,7 @@ fun StudioScreen() {
     var showDramaSwitcherDialog by remember { mutableStateOf(false) }
     var currentEpisodeTitle by remember { mutableStateOf("第 1 集：怒拔逆鳞") }
 
+    var showProductionStudioDialog by remember { mutableStateOf(false) }
     var showCharacterEditDialog by remember { mutableStateOf(false) }
     var editingCharacter by remember { mutableStateOf<CharacterItem?>(null) }
     var showGenerateScriptDialog by remember { mutableStateOf(false) }
@@ -74,10 +70,12 @@ fun StudioScreen() {
                 project = p
                 sotaInfo = s
                 availableVoices = v
+                isOnline = true
                 if (showToast) {
                     Toast.makeText(context, "✅ 云端已同步！当前剧目:《${p.title}》", Toast.LENGTH_SHORT).show()
                 }
             } catch (e: Exception) {
+                isOnline = false
                 if (showToast) {
                     Toast.makeText(context, "⚠️ 网络同步异常，已加载本地缓存", Toast.LENGTH_SHORT).show()
                 }
@@ -100,159 +98,172 @@ fun StudioScreen() {
                     .statusBarsPadding()
                     .border(width = 0.5.dp, color = BorderDark)
             ) {
-                // Tier 1: 品牌顶栏 (Logo + 产品名 + 创作新剧 + 设置)
+                // Tier 1: 品牌顶栏 (高端电影Logo + 状态 + 刷新 + 设置)
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 10.dp),
+                        .padding(horizontal = 14.dp, vertical = 8.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     BrandLogo()
 
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        // 亮眼黄金胶囊按钮：创作新剧
+                        // 在线状态指示胶囊
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(if (isOnline) Color(0xFF064E3B) else Color(0xFF1E293B))
+                                .border(0.5.dp, if (isOnline) Color(0xFF10B981) else Color(0xFF475569), RoundedCornerShape(12.dp))
+                                .padding(horizontal = 6.dp, vertical = 2.dp)
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(6.dp)
+                                        .clip(CircleShape)
+                                        .background(if (isOnline) Color(0xFF10B981) else Color(0xFF94A3B8))
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(
+                                    text = if (isOnline) "机房在线" else "本地模式",
+                                    color = if (isOnline) Color(0xFF6EE7B7) else Color(0xFFCBD5E1),
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.width(4.dp))
+
+                        // 刷新按钮 (带旋转等待反馈)
+                        IconButton(
+                            onClick = { refreshData(showToast = true) },
+                            modifier = Modifier.size(32.dp),
+                            enabled = !isLoading
+                        ) {
+                            if (isLoading) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(15.dp),
+                                    color = BrandCyan,
+                                    strokeWidth = 2.dp
+                                )
+                            } else {
+                                Icon(
+                                    imageVector = Icons.Default.Refresh,
+                                    contentDescription = "Refresh",
+                                    tint = BrandCyan,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                        }
+
+                        // 设置按钮
+                        IconButton(
+                            onClick = { showSotaDialog = true },
+                            modifier = Modifier.size(32.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Settings,
+                                contentDescription = "Settings",
+                                tint = TextSecondary,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                    }
+                }
+
+                // Tier 2: 剧目快捷操作条 (当前剧目 + 创作新剧 + 剪映导出)
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 14.dp, vertical = 4.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    // 剧目切换按钮
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(CardDark)
+                            .border(1.dp, BorderDark, RoundedCornerShape(8.dp))
+                            .clickable { showDramaSwitcherDialog = true }
+                            .padding(horizontal = 8.dp, vertical = 6.dp)
+                    ) {
+                        Text(
+                            text = "《${project.title}》",
+                            color = BrandCyan,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Spacer(modifier = Modifier.width(2.dp))
+                        Icon(
+                            imageVector = Icons.Default.ArrowDropDown,
+                            contentDescription = "Switch",
+                            tint = BrandCyan,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(4.dp))
+                                .background(BorderDark)
+                                .padding(horizontal = 4.dp, vertical = 1.dp)
+                        ) {
+                            Text(
+                                text = currentEpisodeTitle,
+                                color = AccentGold,
+                                fontSize = 9.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+
+                    // 右侧操作按钮组
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        // 创作新剧按钮 (醒目黄金胶囊)
                         Button(
                             onClick = { showGenerateScriptDialog = true },
                             colors = ButtonDefaults.buttonColors(containerColor = AccentGold),
-                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
-                            shape = RoundedCornerShape(20.dp)
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 5.dp),
+                            shape = RoundedCornerShape(16.dp),
+                            modifier = Modifier.height(30.dp)
                         ) {
                             Icon(
                                 imageVector = Icons.Default.AutoAwesome,
                                 contentDescription = null,
                                 tint = BgDark,
-                                modifier = Modifier.size(14.dp)
+                                modifier = Modifier.size(13.dp)
                             )
-                            Spacer(modifier = Modifier.width(4.dp))
+                            Spacer(modifier = Modifier.width(3.dp))
                             Text(
                                 text = "创作新剧",
                                 color = BgDark,
-                                fontSize = 12.sp,
+                                fontSize = 11.sp,
                                 fontWeight = FontWeight.ExtraBold
                             )
                         }
 
                         Spacer(modifier = Modifier.width(6.dp))
 
-                        // 设置按钮 (带微光绿点)
-                        Box(contentAlignment = Alignment.TopEnd) {
-                            IconButton(onClick = { showSotaDialog = true }) {
-                                Icon(
-                                    imageVector = Icons.Default.Settings,
-                                    contentDescription = "Settings",
-                                    tint = TextSecondary,
-                                    modifier = Modifier.size(20.dp)
-                                )
-                            }
-                            // 绿色在线指示小圆点
-                            Box(
-                                modifier = Modifier
-                                    .padding(top = 8.dp, end = 8.dp)
-                                    .size(6.dp)
-                                    .clip(CircleShape)
-                                    .background(AccentEmerald)
-                            )
-                        }
-                    }
-                }
-
-                // Tier 2: 剧目调度与快捷操作卡片
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 14.dp, vertical = 4.dp)
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(CardDark)
-                        .border(1.dp, BorderDark, RoundedCornerShape(10.dp))
-                        .padding(horizontal = 12.dp, vertical = 8.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        // 剧目切换按钮
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(6.dp))
-                                .clickable { showDramaSwitcherDialog = true }
-                                .padding(horizontal = 6.dp, vertical = 4.dp)
+                        // 剪映导出按钮
+                        IconButton(
+                            onClick = {
+                                scope.launch {
+                                    Toast.makeText(context, "正在注入剪映草稿箱...", Toast.LENGTH_SHORT).show()
+                                    val msg = repo.exportJianying(serverUrl)
+                                    Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
+                                }
+                            },
+                            modifier = Modifier.size(30.dp)
                         ) {
-                            Text(
-                                text = "《${project.title}》",
-                                color = BrandCyan,
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                            Spacer(modifier = Modifier.width(2.dp))
                             Icon(
-                                imageVector = Icons.Default.ArrowDropDown,
-                                contentDescription = "Switch",
-                                tint = BrandCyan,
+                                imageVector = Icons.Default.ContentCut,
+                                contentDescription = "CapCut",
+                                tint = AccentGold,
                                 modifier = Modifier.size(16.dp)
                             )
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Box(
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(4.dp))
-                                    .background(BorderDark)
-                                    .padding(horizontal = 4.dp, vertical = 1.dp)
-                            ) {
-                                Text(
-                                    text = currentEpisodeTitle,
-                                    color = AccentGold,
-                                    fontSize = 9.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
-                            }
-                        }
-
-                        // 右侧工具栏：剪映导出与刷新同步
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            // 剪映导出按钮
-                            IconButton(
-                                onClick = {
-                                    scope.launch {
-                                        Toast.makeText(context, "正在注入剪映草稿箱...", Toast.LENGTH_SHORT).show()
-                                        val msg = repo.exportJianying(serverUrl)
-                                        Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
-                                    }
-                                },
-                                modifier = Modifier.size(32.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.ContentCut,
-                                    contentDescription = "CapCut",
-                                    tint = AccentGold,
-                                    modifier = Modifier.size(17.dp)
-                                )
-                            }
-
-                            Spacer(modifier = Modifier.width(4.dp))
-
-                            // 刷新按钮 (带旋转等待与明确 Toast 反馈)
-                            IconButton(
-                                onClick = { refreshData(showToast = true) },
-                                modifier = Modifier.size(32.dp),
-                                enabled = !isLoading
-                            ) {
-                                if (isLoading) {
-                                    CircularProgressIndicator(
-                                        modifier = Modifier.size(15.dp),
-                                        color = BrandCyan,
-                                        strokeWidth = 2.dp
-                                    )
-                                } else {
-                                    Icon(
-                                        imageVector = Icons.Default.Refresh,
-                                        contentDescription = "Refresh",
-                                        tint = BrandCyan,
-                                        modifier = Modifier.size(17.dp)
-                                    )
-                                }
-                            }
                         }
                     }
                 }
@@ -297,18 +308,21 @@ fun StudioScreen() {
                     Column(
                         modifier = Modifier
                             .fillMaxSize()
-                            .padding(16.dp)
+                            .padding(14.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
                     ) {
+                        // 视频模式切换
                         Row(
                             modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
                             Button(
                                 onClick = { activeVideoMode = "full" },
                                 colors = ButtonDefaults.buttonColors(
                                     containerColor = if (activeVideoMode == "full") BrandCyan else BorderDark
                                 ),
-                                modifier = Modifier.weight(1f)
+                                modifier = Modifier.weight(1f),
+                                shape = RoundedCornerShape(8.dp)
                             ) {
                                 Text(
                                     text = "全片电影级成片",
@@ -322,7 +336,8 @@ fun StudioScreen() {
                                 colors = ButtonDefaults.buttonColors(
                                     containerColor = if (activeVideoMode == "live") BrandPurple else BorderDark
                                 ),
-                                modifier = Modifier.weight(1f)
+                                modifier = Modifier.weight(1f),
+                                shape = RoundedCornerShape(8.dp)
                             ) {
                                 Text(
                                     text = "🔥 真人演员活化",
@@ -333,13 +348,22 @@ fun StudioScreen() {
                             }
                         }
 
-                        Spacer(modifier = Modifier.height(12.dp))
+                        Spacer(modifier = Modifier.height(10.dp))
 
+                        // 计算视频播放地址
                         val currentVideoPath = if (activeVideoMode == "full") project.video_url else project.live_actor_video
-                        val fullVideoUrl = if (currentVideoPath.startsWith("http")) currentVideoPath else "$serverUrl$currentVideoPath"
+                        val fullVideoUrl = if (currentVideoPath.isBlank()) {
+                            ""
+                        } else if (currentVideoPath.startsWith("http")) {
+                            currentVideoPath
+                        } else {
+                            "$serverUrl$currentVideoPath"
+                        }
 
+                        // 院线播放器
                         VideoPlayer(
                             videoUrl = fullVideoUrl,
+                            onProduceClick = { showProductionStudioDialog = true },
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .weight(1f)
@@ -347,31 +371,109 @@ fun StudioScreen() {
 
                         Spacer(modifier = Modifier.height(12.dp))
 
+                        // ⭐ 核心英雄按钮：一键开始制作短剧 / 渲染全片 ⭐
+                        Button(
+                            onClick = { showProductionStudioDialog = true },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(48.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = Color.Transparent),
+                            contentPadding = PaddingValues(0.dp),
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .background(
+                                        Brush.horizontalGradient(
+                                            listOf(Color(0xFFFFDF70), Color(0xFFFFB800), Color(0xFF00F2FE))
+                                        )
+                                    ),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(
+                                        imageVector = Icons.Default.AutoAwesome,
+                                        contentDescription = null,
+                                        tint = Color(0xFF0C101A),
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(
+                                        text = "⚡ 一键开始制作短剧 / 渲染全片",
+                                        color = Color(0xFF0C101A),
+                                        fontSize = 14.sp,
+                                        fontWeight = FontWeight.Black
+                                    )
+                                }
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(6.dp))
+
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
-                            Text("1080P · 24FPS 竖屏漫剧", color = TextMuted, fontSize = 11.sp)
-                            Text("三轨合一影视级母带 (AAC)", color = AccentEmerald, fontSize = 11.sp)
+                            Text("1080P · 24FPS 竖屏漫剧", color = TextMuted, fontSize = 10.sp)
+                            Text("三轨合一影视级母带 (AAC)", color = AccentEmerald, fontSize = 10.sp)
                         }
                     }
                 }
                 1 -> {
                     // 全景分镜流
-                    LazyColumn(
+                    Column(
                         modifier = Modifier
                             .fillMaxSize()
-                            .padding(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                            .padding(horizontal = 14.dp, vertical = 10.dp)
                     ) {
-                        items(project.shots) { shot ->
-                            StoryboardCard(
-                                shot = shot,
-                                isSelected = false,
-                                onClick = {
-                                    Toast.makeText(context, "选中分镜 #${shot.id} - ${shot.speaker}：${shot.dialogue}", Toast.LENGTH_SHORT).show()
-                                }
+                        // 分镜流顶栏操作横幅
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(CardDark)
+                                .border(1.dp, BorderDark, RoundedCornerShape(8.dp))
+                                .padding(horizontal = 12.dp, vertical = 8.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "共 ${project.shots.size} 个好莱坞分镜镜头",
+                                color = BrandCyan,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold
                             )
+
+                            Button(
+                                onClick = { showProductionStudioDialog = true },
+                                colors = ButtonDefaults.buttonColors(containerColor = AccentGold),
+                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                                shape = RoundedCornerShape(6.dp),
+                                modifier = Modifier.height(28.dp)
+                            ) {
+                                Icon(Icons.Default.PlayArrow, contentDescription = null, tint = BgDark, modifier = Modifier.size(13.dp))
+                                Spacer(modifier = Modifier.width(3.dp))
+                                Text("启动全片制作", color = BgDark, fontSize = 11.sp, fontWeight = FontWeight.Black)
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(10.dp))
+
+                        LazyColumn(
+                            modifier = Modifier.fillMaxSize(),
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            items(project.shots) { shot ->
+                                StoryboardCard(
+                                    shot = shot,
+                                    serverUrl = serverUrl,
+                                    isSelected = false,
+                                    onClick = {
+                                        Toast.makeText(context, "选中分镜 #${shot.id} - ${shot.speaker}", Toast.LENGTH_SHORT).show()
+                                    }
+                                )
+                            }
                         }
                     }
                 }
@@ -380,11 +482,10 @@ fun StudioScreen() {
                     LazyColumn(
                         modifier = Modifier
                             .fillMaxSize()
-                            .padding(16.dp),
+                            .padding(14.dp),
                         verticalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
                         item {
-                            // 打造新角色 Header
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -419,42 +520,7 @@ fun StudioScreen() {
                             }
                         }
 
-                        // 快速横向角色画廊
-                        if (project.characters.isNotEmpty()) {
-                            item {
-                                LazyRow(
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                    modifier = Modifier.fillMaxWidth()
-                                ) {
-                                    items(project.characters) { c ->
-                                        Box(
-                                            modifier = Modifier
-                                                .clip(RoundedCornerShape(8.dp))
-                                                .background(CardDark)
-                                                .border(1.dp, BorderDark, RoundedCornerShape(8.dp))
-                                                .clickable {
-                                                    editingCharacter = c
-                                                    showCharacterEditDialog = true
-                                                }
-                                                .padding(horizontal = 10.dp, vertical = 6.dp)
-                                        ) {
-                                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                                Box(
-                                                    modifier = Modifier
-                                                        .size(8.dp)
-                                                        .clip(CircleShape)
-                                                        .background(BrandCyan)
-                                                )
-                                                Spacer(modifier = Modifier.width(6.dp))
-                                                Text(c.name, color = TextPrimary, fontSize = 11.sp, fontWeight = FontWeight.Medium)
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-
-                        // 角色卡片详细列表
+                        // 角色卡片列表
                         items(project.characters) { char ->
                             CharacterCard(
                                 character = char,
@@ -473,11 +539,11 @@ fun StudioScreen() {
                         }
 
                         item {
-                            Spacer(modifier = Modifier.height(10.dp))
+                            Spacer(modifier = Modifier.height(8.dp))
                             Text(
                                 text = "多轨声音母带引擎",
                                 color = BrandPurple,
-                                fontSize = 14.sp,
+                                fontSize = 13.sp,
                                 fontWeight = FontWeight.Bold
                             )
                         }
@@ -507,6 +573,20 @@ fun StudioScreen() {
                 }
             }
         }
+    }
+
+    // 🎬 AI 智能制片机房弹窗 (核心制作流)
+    if (showProductionStudioDialog) {
+        ProductionStudioDialog(
+            serverUrl = serverUrl,
+            title = project.title,
+            genre = project.genre,
+            onFinished = { newUrl ->
+                selectedTab = 0
+                refreshData(showToast = true)
+            },
+            onDismiss = { showProductionStudioDialog = false }
+        )
     }
 
     // 剧目管理与切换弹窗
@@ -547,7 +627,7 @@ fun StudioScreen() {
         )
     }
 
-    // AI 小说剧本拆解弹窗
+    // AI 小说剧本拆解与制作弹窗
     if (showGenerateScriptDialog) {
         GenerateScriptDialog(
             isGenerating = isGeneratingScript,
@@ -560,11 +640,22 @@ fun StudioScreen() {
                     if (newProj != null) {
                         project = newProj
                         currentEpisodeTitle = "第 1 集：分镜已就绪"
-                        Toast.makeText(context, "《${t}》全新剧目生成成功！提取了 ${newProj.characters.size} 位新角色", Toast.LENGTH_LONG).show()
+                        Toast.makeText(context, "《${t}》分镜拆解成功！", Toast.LENGTH_SHORT).show()
                     } else {
-                        Toast.makeText(context, "剧本拆解已提交，正在同步最新剧目...", Toast.LENGTH_SHORT).show()
                         refreshData(showToast = true)
                     }
+                }
+            },
+            onGenerateAndProduce = { t, g, text ->
+                scope.launch {
+                    isGeneratingScript = true
+                    val newProj = repo.generateScript(serverUrl, t, g, text)
+                    isGeneratingScript = false
+                    showGenerateScriptDialog = false
+                    if (newProj != null) {
+                        project = newProj
+                    }
+                    showProductionStudioDialog = true
                 }
             },
             onDismiss = { showGenerateScriptDialog = false }

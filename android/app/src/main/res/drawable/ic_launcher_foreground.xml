@@ -4,19 +4,26 @@
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-    <!-- 金色电影场记板与摄像徽标 -->
-    <path
-        android:fillColor="#F59E0B"
-        android:pathData="M28,34h52c3.3,0 6,2.7 6,6v28c0,3.3 -2.7,6 -6,6h-52c-3.3,0 -6,-2.7 -6,-6v-28c0,-3.3 2.7,-6 6,-6z" />
-    <path
-        android:fillColor="#0D111A"
-        android:pathData="M32,46h44v22h-44z" />
-    <!-- 播放三角徽标 -->
+    <!-- 外圈黑金高光环 -->
     <path
         android:fillColor="#FFD700"
-        android:pathData="M50,51l12,6l-12,6z" />
-    <!-- 场记板斜杠条纹 -->
+        android:pathData="M54,22 C71.67,22 86,36.33 86,54 C86,71.67 71.67,86 54,86 C36.33,86 22,71.67 22,54 C22,36.33 36.33,22 54,22 Z" />
     <path
-        android:fillColor="#0D111A"
-        android:pathData="M34,36l6,8h6l-6,-8z M50,36l6,8h6l-6,-8z M66,36l6,8h6l-6,-8z" />
+        android:fillColor="#090C14"
+        android:pathData="M54,25 C70,25 83,38 83,54 C83,70 70,83 54,83 C38,83 25,70 25,54 C25,38 38,25 54,25 Z" />
+    <!-- 内部电影光圈环 -->
+    <path
+        android:fillColor="#00F2FE"
+        android:pathData="M54,28 C68.36,28 80,39.64 80,54 C80,68.36 68.36,80 54,80 C39.64,80 28,68.36 28,54 C28,39.64 39.64,28 54,28 Z" />
+    <path
+        android:fillColor="#111624"
+        android:pathData="M54,31 C66.7,31 77,41.3 77,54 C77,66.7 66.7,77 54,77 C41.3,77 31,66.7 31,54 C31,41.3 41.3,31 54,31 Z" />
+    <!-- 电影黄金播放三角与几何镜头 -->
+    <path
+        android:fillColor="#FFDF70"
+        android:pathData="M44,40 L44,68 L68,54 Z" />
+    <!-- 顶部璀璨科技星芒 -->
+    <path
+        android:fillColor="#00F2FE"
+        android:pathData="M72,30 L74,36 L80,38 L74,40 L72,46 L70,40 L64,38 L70,36 Z" />
 </vector>
