@@ -1,6 +1,8 @@
 package com.omnidrama.app.data.repository
 
+import android.content.Context
 import com.google.gson.Gson
+import com.omnidrama.app.data.local.LocalAndroidEngine
 import com.omnidrama.app.data.model.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -12,8 +14,8 @@ import java.util.concurrent.TimeUnit
 
 class DramaRepository {
     private val client = OkHttpClient.Builder()
-        .connectTimeout(15, TimeUnit.SECONDS)
-        .readTimeout(60, TimeUnit.SECONDS)
+        .connectTimeout(4, TimeUnit.SECONDS)
+        .readTimeout(20, TimeUnit.SECONDS)
         .addInterceptor { chain ->
             val newReq = chain.request().newBuilder()
                 .addHeader("Bypass-Tunnel-Reminder", "true")
@@ -24,58 +26,89 @@ class DramaRepository {
 
     private val gson = Gson()
 
-    suspend fun getProject(baseUrl: String): ProjectData = withContext(Dispatchers.IO) {
-        try {
-            val req = Request.Builder().url("$baseUrl/api/project").build()
-            client.newCall(req).execute().use { resp ->
-                if (resp.isSuccessful) {
-                    val body = resp.body?.string()
-                    if (!body.isNullOrBlank()) {
-                        return@withContext gson.fromJson(body, ProjectData::class.java)
+    suspend fun getProject(context: Context, baseUrl: String): ProjectData = withContext(Dispatchers.IO) {
+        val localCurrent = LocalAndroidEngine.getCurrentWork(context)
+        if (baseUrl.isNotBlank()) {
+            try {
+                val req = Request.Builder().url("$baseUrl/api/project").build()
+                client.newCall(req).execute().use { resp ->
+                    if (resp.isSuccessful) {
+                        val body = resp.body?.string()
+                        if (!body.isNullOrBlank() && body.trim().startsWith("{")) {
+                            val remoteProj = gson.fromJson(body, ProjectData::class.java)
+                            if (remoteProj != null && remoteProj.title.isNotBlank()) {
+                                LocalAndroidEngine.saveCreatorWork(context, remoteProj)
+                                return@withContext remoteProj
+                            }
+                        }
                     }
                 }
+            } catch (_: Exception) {
             }
-        } catch (e: Exception) {
-            // 离线高可用回退
         }
-        return@withContext getOfflineMockProject()
+        return@withContext localCurrent
     }
 
-    suspend fun getSotaStatus(baseUrl: String): SotaStatusResponse = withContext(Dispatchers.IO) {
-        try {
-            val req = Request.Builder().url("$baseUrl/api/sota/status").build()
-            client.newCall(req).execute().use { resp ->
-                if (resp.isSuccessful) {
-                    val body = resp.body?.string()
-                    if (!body.isNullOrBlank()) {
-                        return@withContext gson.fromJson(body, SotaStatusResponse::class.java)
+    suspend fun getSotaStatus(context: Context, baseUrl: String): SotaStatusResponse = withContext(Dispatchers.IO) {
+        val localKeys = LocalAndroidEngine.getSavedApiKeys(context)
+        if (baseUrl.isNotBlank()) {
+            try {
+                val req = Request.Builder().url("$baseUrl/api/sota/status").build()
+                client.newCall(req).execute().use { resp ->
+                    if (resp.isSuccessful) {
+                        val body = resp.body?.string()
+                        if (!body.isNullOrBlank() && body.trim().startsWith("{") && body.contains("\"providers\"")) {
+                            val remote = gson.fromJson(body, SotaStatusResponse::class.java)
+                            if (remote != null && remote.providers.isNotEmpty()) {
+                                val mergedProviders = remote.providers.mapValues { (_, item) ->
+                                    val localVal = localKeys[item.env_key]
+                                    if (!item.configured && !localVal.isNullOrBlank()) {
+                                        item.copy(
+                                            configured = true,
+                                            masked_key = LocalAndroidEngine.maskKey(localVal)
+                                        )
+                                    } else {
+                                        item
+                                    }
+                                }
+                                return@withContext remote.copy(providers = mergedProviders)
+                            }
+                        }
                     }
                 }
+            } catch (_: Exception) {
             }
-        } catch (e: Exception) {
-            // 离线回退
         }
-        return@withContext getOfflineMockSota()
+        return@withContext buildLocalSotaStatus(localKeys)
     }
 
-    suspend fun saveApiKeys(baseUrl: String, keys: Map<String, String>): Boolean = withContext(Dispatchers.IO) {
-        try {
-            val payload = mapOf("keys" to keys)
-            val json = gson.toJson(payload)
-            val req = Request.Builder()
-                .url("$baseUrl/api/sota/save-keys")
-                .post(json.toRequestBody("application/json".toMediaType()))
-                .build()
-            client.newCall(req).execute().use { resp ->
-                return@withContext resp.isSuccessful
+    suspend fun saveApiKeys(context: Context, baseUrl: String, keys: Map<String, String>): Boolean = withContext(Dispatchers.IO) {
+        // 1. 始终先保存到手机本地加密/持久化存储，确保即使未连接电脑机房也 100% 生效
+        LocalAndroidEngine.saveApiKeysLocally(context, keys)
+
+        // 2. 如果配置了远端机房地址，同步推送至远端
+        if (baseUrl.isNotBlank()) {
+            try {
+                val payload = mapOf("keys" to keys)
+                val json = gson.toJson(payload)
+                val req = Request.Builder()
+                    .url("$baseUrl/api/sota/save-keys")
+                    .post(json.toRequestBody("application/json".toMediaType()))
+                    .build()
+                client.newCall(req).execute().use { resp ->
+                    return@withContext resp.isSuccessful
+                }
+            } catch (_: Exception) {
             }
-        } catch (e: Exception) {
-            return@withContext false
         }
+        return@withContext true
     }
 
     suspend fun updateAndRegenerateShot(
+        context: Context,
         baseUrl: String,
+        title: String,
+        genre: String,
         shotId: Int,
         speaker: String,
         dialogue: String,
@@ -83,27 +116,67 @@ class DramaRepository {
         motion: String,
         regenerateImage: Boolean,
         regenerateAudio: Boolean
-    ): Boolean = withContext(Dispatchers.IO) {
-        try {
-            val payload = mapOf(
-                "speaker" to speaker,
-                "dialogue" to dialogue,
-                "visual_prompt" to visualPrompt,
-                "motion" to motion,
-                "regenerate_image" to regenerateImage,
-                "regenerate_audio" to regenerateAudio
-            )
-            val json = gson.toJson(payload)
-            val req = Request.Builder()
-                .url("$baseUrl/api/shots/$shotId")
-                .put(json.toRequestBody("application/json".toMediaType()))
-                .build()
-            client.newCall(req).execute().use { resp ->
-                return@withContext resp.isSuccessful
-            }
-        } catch (e: Exception) {
-            return@withContext false
+    ): ProjectData = withContext(Dispatchers.IO) {
+        val mVal = motion.uppercase()
+        val mName = when {
+            mVal.contains("SHAKE") -> "镜头震撼"
+            mVal.contains("OUT") -> "镜头拉远"
+            mVal.contains("PAN") -> "向左横移"
+            else -> "镜头推进"
         }
+
+        // 1. 先尝试远程机房更新
+        if (baseUrl.isNotBlank()) {
+            try {
+                val payload = mapOf(
+                    "speaker" to speaker,
+                    "dialogue" to dialogue,
+                    "visual_prompt" to visualPrompt,
+                    "motion" to mVal,
+                    "regenerate_image" to regenerateImage,
+                    "regenerate_audio" to regenerateAudio
+                )
+                val json = gson.toJson(payload)
+                val req = Request.Builder()
+                    .url("$baseUrl/api/shots/$shotId")
+                    .put(json.toRequestBody("application/json".toMediaType()))
+                    .build()
+                client.newCall(req).execute().use { resp ->
+                    if (resp.isSuccessful) {
+                        val updated = getProject(context, baseUrl)
+                        if (updated.title.isNotBlank()) {
+                            return@withContext updated
+                        }
+                    }
+                }
+            } catch (_: Exception) {
+            }
+        }
+
+        // 2. 手机本地直接更新并重绘该镜头画面
+        val cur = LocalAndroidEngine.getCurrentWork(context)
+        val newShots = cur.shots.map { s ->
+            if (s.id == shotId) {
+                val updatedShot = s.copy(
+                    speaker = speaker,
+                    dialogue = dialogue,
+                    visual_prompt = visualPrompt,
+                    motion = mVal,
+                    motion_name = mName
+                )
+                if (regenerateImage) {
+                    val file = LocalAndroidEngine.generateShotImageOnPhone(context, title, genre, updatedShot)
+                    updatedShot.copy(image = file.absolutePath)
+                } else {
+                    updatedShot
+                }
+            } else {
+                s
+            }
+        }
+        val updatedWork = cur.copy(shots = newShots)
+        LocalAndroidEngine.saveCreatorWork(context, updatedWork)
+        return@withContext updatedWork
     }
 
     suspend fun exportJianying(baseUrl: String): String = withContext(Dispatchers.IO) {
@@ -114,16 +187,22 @@ class DramaRepository {
                 .build()
             client.newCall(req).execute().use { resp ->
                 if (resp.isSuccessful) {
-                    return@withContext "已成功注入剪映草稿箱！"
+                    return@withContext "已成功导出剪映草稿工程！"
                 }
             }
-        } catch (e: Exception) {
-            return@withContext "导出请求失败: ${e.localizedMessage}"
+        } catch (_: Exception) {
         }
-        return@withContext "导出完成"
+        return@withContext "当前为手机独立算力模式，请直接点击【📥 下载成片】保存 MP4 到手机相册后导入剪映 App"
     }
 
-    suspend fun addCharacter(baseUrl: String, character: CharacterItem): Boolean = withContext(Dispatchers.IO) {
+    suspend fun addCharacter(context: Context, baseUrl: String, character: CharacterItem): Boolean = withContext(Dispatchers.IO) {
+        val cur = LocalAndroidEngine.getCurrentWork(context)
+        if (cur.title.isNotBlank()) {
+            val list = cur.characters.toMutableList()
+            val idx = list.indexOfFirst { it.name == character.name }
+            if (idx >= 0) list[idx] = character else list.add(character)
+            LocalAndroidEngine.saveCreatorWork(context, cur.copy(characters = list))
+        }
         try {
             val json = gson.toJson(character)
             val req = Request.Builder()
@@ -133,12 +212,19 @@ class DramaRepository {
             client.newCall(req).execute().use { resp ->
                 return@withContext resp.isSuccessful
             }
-        } catch (e: Exception) {
-            return@withContext false
+        } catch (_: Exception) {
+            return@withContext true
         }
     }
 
-    suspend fun deleteCharacter(baseUrl: String, name: String): Boolean = withContext(Dispatchers.IO) {
+    suspend fun deleteCharacter(context: Context, baseUrl: String, name: String): Boolean = withContext(Dispatchers.IO) {
+        val cur = LocalAndroidEngine.getCurrentWork(context)
+        if (cur.title.isNotBlank()) {
+            LocalAndroidEngine.saveCreatorWork(
+                context,
+                cur.copy(characters = cur.characters.filter { it.name != name })
+            )
+        }
         try {
             val encodedName = java.net.URLEncoder.encode(name, "UTF-8")
             val req = Request.Builder()
@@ -148,38 +234,53 @@ class DramaRepository {
             client.newCall(req).execute().use { resp ->
                 return@withContext resp.isSuccessful
             }
-        } catch (e: Exception) {
-            return@withContext false
+        } catch (_: Exception) {
+            return@withContext true
         }
     }
 
-    suspend fun generateScript(baseUrl: String, title: String, genre: String, novelText: String): ProjectData? = withContext(Dispatchers.IO) {
-        try {
-            val payload = mapOf(
-                "title" to title,
-                "genre" to genre,
-                "novel_text" to novelText
-            )
-            val json = gson.toJson(payload)
-            val req = Request.Builder()
-                .url("$baseUrl/api/project/generate")
-                .post(json.toRequestBody("application/json".toMediaType()))
-                .build()
-            client.newCall(req).execute().use { resp ->
-                if (resp.isSuccessful) {
-                    val body = resp.body?.string()
-                    if (!body.isNullOrBlank()) {
-                        return@withContext gson.fromJson(body, ProjectData::class.java)
+    suspend fun generateScript(
+        context: Context,
+        baseUrl: String,
+        title: String,
+        genre: String,
+        novelText: String
+    ): ProjectData = withContext(Dispatchers.IO) {
+        // 1. 尝试远端算力机房拆解
+        if (baseUrl.isNotBlank()) {
+            try {
+                val payload = mapOf(
+                    "title" to title,
+                    "genre" to genre,
+                    "novel_text" to novelText
+                )
+                val json = gson.toJson(payload)
+                val req = Request.Builder()
+                    .url("$baseUrl/api/project/generate")
+                    .post(json.toRequestBody("application/json".toMediaType()))
+                    .build()
+                client.newCall(req).execute().use { resp ->
+                    if (resp.isSuccessful) {
+                        val body = resp.body?.string()
+                        if (!body.isNullOrBlank() && body.trim().startsWith("{")) {
+                            val remoteWork = gson.fromJson(body, ProjectData::class.java)
+                            if (remoteWork != null && remoteWork.title.isNotBlank()) {
+                                LocalAndroidEngine.saveCreatorWork(context, remoteWork)
+                                return@withContext remoteWork
+                            }
+                        }
                     }
                 }
+            } catch (_: Exception) {
             }
-        } catch (e: Exception) {
-            return@withContext null
         }
-        return@withContext null
+
+        // 2. 手机独立算力引擎直接拆解 (直连云端大模型 API 或智能分镜解析)
+        return@withContext LocalAndroidEngine.breakdownStoryOnPhone(context, title, genre, novelText)
     }
 
     suspend fun triggerRender(baseUrl: String, title: String = "", genre: String = ""): Boolean = withContext(Dispatchers.IO) {
+        if (baseUrl.isBlank()) return@withContext false
         try {
             val payload = mapOf("title" to title, "genre" to genre)
             val json = gson.toJson(payload)
@@ -188,9 +289,10 @@ class DramaRepository {
                 .post(json.toRequestBody("application/json".toMediaType()))
                 .build()
             client.newCall(req).execute().use { resp ->
-                return@withContext resp.isSuccessful
+                val body = resp.body?.string() ?: ""
+                return@withContext resp.isSuccessful && body.trim().startsWith("{")
             }
-        } catch (e: Exception) {
+        } catch (_: Exception) {
             return@withContext false
         }
     }
@@ -201,12 +303,12 @@ class DramaRepository {
             client.newCall(req).execute().use { resp ->
                 if (resp.isSuccessful) {
                     val body = resp.body?.string()
-                    if (!body.isNullOrBlank()) {
+                    if (!body.isNullOrBlank() && body.trim().startsWith("{")) {
                         return@withContext gson.fromJson(body, RenderStatusResponse::class.java)
                     }
                 }
             }
-        } catch (e: Exception) {
+        } catch (_: Exception) {
         }
         return@withContext null
     }
@@ -217,13 +319,13 @@ class DramaRepository {
             client.newCall(req).execute().use { resp ->
                 if (resp.isSuccessful) {
                     val body = resp.body?.string()
-                    if (!body.isNullOrBlank()) {
+                    if (!body.isNullOrBlank() && body.trim().startsWith("[")) {
                         val type = object : com.google.gson.reflect.TypeToken<List<VoiceItem>>() {}.type
                         return@withContext gson.fromJson(body, type)
                     }
                 }
             }
-        } catch (e: Exception) {
+        } catch (_: Exception) {
         }
         return@withContext listOf(
             VoiceItem("云希 (磁性沉稳霸道)", "zh-CN-YunxiNeural", "男霸总/战神", "male"),
@@ -235,53 +337,30 @@ class DramaRepository {
         )
     }
 
-    private fun getOfflineMockProject(): ProjectData {
-        val shots = listOf(
-            ShotItem(1, "旁白", "WIDE_SHOT", "ZOOM_IN", "镜头推进", "林家祖宅大堂，狂风骤雨拍打着雕花木窗。", "/api/shots/1/image", "/api/shots/1/audio", "暴雨环境音", "masterpiece, 8k anime vertical drama, dark luxury mansion hall, heavy rain storm"),
-            ShotItem(2, "岳母柳琴", "MEDIUM_SHOT", "PAN_LEFT", "向左横移", "叶辰，入赘三年，今日若拿不出三千万，就立刻滚出林家！", "/api/shots/2/image", "/api/shots/2/audio", "无", "masterpiece, 8k anime vertical drama, haughty wealthy middle-aged woman in emerald qipao"),
-            ShotItem(3, "旁白", "CLOSE_UP", "ZOOM_IN", "镜头推进", "叶辰神色淡然，深邃的双眸中隐现寒光。", "/api/shots/3/image", "/api/shots/3/audio", "无", "masterpiece, 8k anime close-up portrait, handsome young man with sharp cold eyes"),
-            ShotItem(4, "叶辰", "CLOSE_UP", "ZOOM_IN", "镜头推进", "三千万？当年若非我暗中相助，林家早在三年前就已灰飞烟灭！", "/api/shots/4/image", "/api/shots/4/audio", "疾风起势 (Whoosh)", "masterpiece, 8k anime vertical drama, domineering young dragon king speaking coldly"),
-            ShotItem(5, "赵公子", "MEDIUM_SHOT", "ZOOM_OUT", "镜头拉远", "哈哈哈！大言不惭的废物，也不撒泡尿照照自己是个什么东西！", "/api/shots/5/image", "/api/shots/5/audio", "无", "masterpiece, 8k anime vertical drama, arrogant rich young master in white suit holding red wine glass"),
-            ShotItem(6, "旁白", "FULL_SHOT", "SHAKE", "镜头震撼", "突然，天地间惊雷滚滚，整座大堂剧烈震颤！", "/api/shots/6/image", "/api/shots/6/audio", "惊雷劈裂 (Thunder)", "masterpiece, 8k anime vertical drama, dramatic lightning bolts striking across dark stormy sky"),
-            ShotItem(7, "旁白", "FULL_SHOT", "ZOOM_OUT", "镜头拉远", "大门轰然破碎，十八位身披黑金战铠的修罗战神破门而入！", "/api/shots/7/image", "/api/shots/7/audio", "重低音轰鸣 (Impact)", "masterpiece, 8k anime vertical drama, eighteen elite armored warriors bursting through doors"),
-            ShotItem(8, "修罗战神", "CLOSE_UP", "ZOOM_IN", "镜头推进", "恭迎龙王回归！十万修罗殿众将，随时听候调遣！", "/api/shots/8/image", "/api/shots/8/audio", "金铁下跪 (Armor)", "masterpiece, 8k anime vertical drama, armored general kneeling on one knee in respect"),
-            ShotItem(9, "岳母与赵公子", "MEDIUM_SHOT", "SHAKE", "镜头震撼", "龙……龙王？！你竟然是那位镇守北境的至尊龙王！", "/api/shots/9/image", "/api/shots/9/audio", "无", "masterpiece, 8k anime vertical drama, shocked wealthy woman and young master pale with terror"),
-            ShotItem(10, "叶辰", "EXTREME_CLOSE_UP", "ZOOM_IN", "镜头推进", "犯我逆鳞者，杀无赦！", "/api/shots/10/image", "/api/shots/10/audio", "终极大爆炸 (Impact)", "masterpiece, 8k anime extreme close-up, glowing golden dragon eyes, supreme aura")
-        )
-        val chars = listOf(
-            CharacterItem("叶辰 (主角)", "至尊龙王", "云希 (磁性沉稳霸道)", "/api/shots/4/image", "黑发冷眸，修罗战神之主，隐藏滔天权势"),
-            CharacterItem("岳母柳琴", "刁难反派", "晓晓 (尖酸刻薄逼迫)", "/api/shots/2/image", "翡翠旗袍，拜金势力，豪门大堂"),
-            CharacterItem("赵公子", "狂妄对手", "云健 (嚣张跋扈)", "/api/shots/5/image", "定制西装，手持红酒，自傲恶少")
-        )
-        val tracks = listOf(
-            AudioTrackItem("人声对白轨", "已对齐", "Edge-TTS 神经网络多音色"),
-            AudioTrackItem("拟音音效轨 (SFX)", "已注入", "暴雨 + 惊雷 + 破门轰鸣 + 金铁下跪"),
-            AudioTrackItem("电影配乐轨 (BGM)", "已卡点", "战神觉醒史诗管弦交响")
-        )
-        return ProjectData(
-            title = "至尊龙王归位",
-            genre = "都市战神爽文",
-            video_url = "/api/video/stream?mode=full",
-            live_actor_video = "/api/video/stream?mode=live",
-            duration = 61.61,
-            characters = chars,
-            shots = shots,
-            audio_tracks = tracks
-        )
-    }
+    private fun buildLocalSotaStatus(localKeys: Map<String, String>): SotaStatusResponse {
+        fun entry(name: String, role: String, envKey: String, tier: String): ProviderItem {
+            val v = localKeys[envKey]?.trim() ?: ""
+            return ProviderItem(
+                name = name,
+                role = role,
+                env_key = envKey,
+                configured = v.isNotEmpty(),
+                masked_key = LocalAndroidEngine.maskKey(v),
+                tier = tier
+            )
+        }
 
-    private fun getOfflineMockSota(): SotaStatusResponse {
         val providers = mapOf(
-            "siliconflow" to ProviderItem("🔥 硅基流动 SiliconFlow (国内免绑卡首选)", "一个Key同时开启：免费 FLUX.1 逐镜真实生图 + DeepSeek/Qwen 导演剧本拆解", "SILICONFLOW_API_KEY", false, "", "国内免费生图+导演"),
-            "deepseek" to ProviderItem("DeepSeek-V3 / R1 (深度求索官方)", "好莱坞编剧与十镜分镜剧本拆解总导演", "DEEPSEEK_API_KEY", false, "", "主力导演 (国内直连)"),
-            "pexels" to ProviderItem("Pexels 免费高清视频/图片素材库", "对标 MoneyPrinterTurbo：0元免绑卡自动匹配下载 9:16 竖屏高清实拍素材", "PEXELS_API_KEY", false, "", "免费动态视频素材"),
-            "kimi" to ProviderItem("Kimi (月之暗面 Moonshot AI)", "长篇网文理解、剧本台词打磨与镜头关键词提炼", "MOONSHOT_API_KEY", false, "", "国内直连 (SOTA)"),
-            "gemini" to ProviderItem("Google Gemini 2.0 Flash", "多模态剧本拆解与分镜视觉提示词引擎", "GEMINI_API_KEY", false, "", "高速导演"),
-            "image" to ProviderItem("FLUX.1 Pro (Black Forest Labs)", "8K 胶片级定妆与分镜剧照生图 (海外官方)", "BFL_API_KEY", false, "", "行业顶级 (SOTA)"),
-            "voice" to ProviderItem("ElevenLabs Multilingual v2", "人类级呼吸感情绪配音 (未配则用内置免费微软 Edge-TTS)", "ELEVENLABS_API_KEY", false, "", "行业顶级 (SOTA)")
+            "siliconflow" to entry("🔥 硅基流动 SiliconFlow (国内免绑卡首选)", "手机直连：免费 FLUX.1 逐镜生图 + DeepSeek/Qwen 导演拆解 + CosyVoice 配音", "SILICONFLOW_API_KEY", "国内免费生图+导演"),
+            "deepseek" to entry("DeepSeek-V3 / R1 (深度求索官方)", "手机直连：好莱坞编剧与分镜剧本拆解总导演", "DEEPSEEK_API_KEY", "主力导演 (国内直连)"),
+            "pexels" to entry("Pexels 免费高清视频/图片素材库", "手机直连：0元免绑卡自动匹配下载 9:16 竖屏高清实拍剧照", "PEXELS_API_KEY", "免费高清素材"),
+            "kimi" to entry("Kimi (月之暗面 Moonshot AI)", "手机直连：长篇网文理解、剧本台词打磨与镜头关键词提炼", "MOONSHOT_API_KEY", "国内直连 (SOTA)"),
+            "gemini" to entry("Google Gemini 2.0 Flash", "多模态剧本拆解与分镜视觉提示词引擎", "GEMINI_API_KEY", "高速导演"),
+            "image" to entry("FLUX.1 Pro (Black Forest Labs)", "8K 胶片级定妆与分镜剧照生图 (海外官方)", "BFL_API_KEY", "行业顶级 (SOTA)"),
+            "voice" to entry("ElevenLabs Multilingual v2", "人类级呼吸感情绪配音 (未配则用内置中文语音合成)", "ELEVENLABS_API_KEY", "行业顶级 (SOTA)")
         )
         return SotaStatusResponse(
-            system = SystemStatus("离线模式 (请检查后端服务地址)", true, false, ""),
+            system = SystemStatus("未连接远程电脑机房 (已启用手机本地独立算力引擎)", true, false, ""),
             providers = providers
         )
     }

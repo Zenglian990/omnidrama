@@ -122,8 +122,14 @@ def _load_project_data() -> Dict[str, Any]:
         try:
             with open(PROJECT_STATE_FILE, "r", encoding="utf-8") as f:
                 d = json.load(f)
-                d["video_url"] = "/api/video/stream?mode=full"
-                d["live_actor_video"] = "/api/video/stream?mode=live"
+                title = d.get("title", "").strip()
+                if title:
+                    final_mp4 = OUTPUT_DIR / title / f"{title}_影视级成片.mp4"
+                    d["video_url"] = "/api/video/stream?mode=full" if final_mp4.exists() else ""
+                    d["live_actor_video"] = "/api/video/stream?mode=live" if final_mp4.exists() else ""
+                else:
+                    d["video_url"] = ""
+                    d["live_actor_video"] = ""
                 for s in d.get("shots", []):
                     if "visual_prompt" not in s or not s["visual_prompt"]:
                         s["visual_prompt"] = f"masterpiece, 8k vertical anime drama, {s.get('speaker', 'character')}, {s.get('dialogue', '')}, cinematic lighting"
@@ -131,170 +137,19 @@ def _load_project_data() -> Dict[str, Any]:
         except Exception:
             pass
 
-    shots = [
-        {
-            "id": 1,
-            "speaker": "旁白",
-            "scale": "WIDE_SHOT",
-            "motion": "ZOOM_IN",
-            "motion_name": "镜头推进",
-            "dialogue": "林家祖宅大堂，狂风骤雨拍打着雕花木窗。",
-            "visual_prompt": "masterpiece, 8k anime vertical drama, dark luxury mansion hall, heavy rain storm outside carved wooden window, cinematic lighting",
-            "image": "/api/shots/1/image",
-            "audio": "/api/shots/1/audio",
-            "sfx": "暴雨环境音"
-        },
-        {
-            "id": 2,
-            "speaker": "岳母柳琴",
-            "scale": "MEDIUM_SHOT",
-            "motion": "PAN_LEFT",
-            "motion_name": "向左横移",
-            "dialogue": "叶辰，入赘三年，今日若拿不出三千万，就立刻滚出林家！",
-            "visual_prompt": "masterpiece, 8k anime vertical drama, haughty wealthy middle-aged woman in emerald qipao pointing finger angrily, cold arrogant expression",
-            "image": "/api/shots/2/image",
-            "audio": "/api/shots/2/audio",
-            "sfx": "无"
-        },
-        {
-            "id": 3,
-            "speaker": "旁白",
-            "scale": "CLOSE_UP",
-            "motion": "ZOOM_IN",
-            "motion_name": "镜头推进",
-            "dialogue": "叶辰神色淡然，深邃的双眸中隐现寒光。",
-            "visual_prompt": "masterpiece, 8k anime close-up portrait, handsome young man with sharp cold eyes, calm aura, dark hair, dramatic rim light",
-            "image": "/api/shots/3/image",
-            "audio": "/api/shots/3/audio",
-            "sfx": "无"
-        },
-        {
-            "id": 4,
-            "speaker": "叶辰",
-            "scale": "CLOSE_UP",
-            "motion": "ZOOM_IN",
-            "motion_name": "镜头推进",
-            "dialogue": "三千万？当年若非我暗中相助，林家早在三年前就已灰飞烟灭！",
-            "visual_prompt": "masterpiece, 8k anime vertical drama, domineering young dragon king speaking coldly, golden aura sparks, dark suit",
-            "image": "/api/shots/4/image",
-            "audio": "/api/shots/4/audio",
-            "sfx": "疾风起势 (Whoosh)"
-        },
-        {
-            "id": 5,
-            "speaker": "赵公子",
-            "scale": "MEDIUM_SHOT",
-            "motion": "ZOOM_OUT",
-            "motion_name": "镜头拉远",
-            "dialogue": "哈哈哈！大言不惭的废物，也不撒泡尿照照自己是个什么东西！",
-            "visual_prompt": "masterpiece, 8k anime vertical drama, arrogant rich young master in white suit holding red wine glass laughing mockingly",
-            "image": "/api/shots/5/image",
-            "audio": "/api/shots/5/audio",
-            "sfx": "无"
-        },
-        {
-            "id": 6,
-            "speaker": "旁白",
-            "scale": "FULL_SHOT",
-            "motion": "SHAKE",
-            "motion_name": "镜头震撼",
-            "dialogue": "突然，天地间惊雷滚滚，整座大堂剧烈震颤！",
-            "visual_prompt": "masterpiece, 8k anime vertical drama, dramatic lightning bolts striking across dark stormy sky above grand mansion, shockwave",
-            "image": "/api/shots/6/image",
-            "audio": "/api/shots/6/audio",
-            "sfx": "惊雷劈裂 (Thunder)"
-        },
-        {
-            "id": 7,
-            "speaker": "旁白",
-            "scale": "FULL_SHOT",
-            "motion": "ZOOM_OUT",
-            "motion_name": "镜头拉远",
-            "dialogue": "大门轰然破碎，十八位身披黑金战铠的修罗战神破门而入！",
-            "visual_prompt": "masterpiece, 8k anime vertical drama, eighteen elite armored warriors in black and gold armor bursting through shattered mansion doors",
-            "image": "/api/shots/7/image",
-            "audio": "/api/shots/7/audio",
-            "sfx": "重低音轰鸣 (Impact)"
-        },
-        {
-            "id": 8,
-            "speaker": "修罗战神",
-            "scale": "CLOSE_UP",
-            "motion": "ZOOM_IN",
-            "motion_name": "镜头推进",
-            "dialogue": "恭迎龙王回归！十万修罗殿众将，随时听候调遣！",
-            "visual_prompt": "masterpiece, 8k anime vertical drama, armored general kneeling on one knee in respect, rain and golden light, epic atmosphere",
-            "image": "/api/shots/8/image",
-            "audio": "/api/shots/8/audio",
-            "sfx": "金铁下跪 (Armor)"
-        },
-        {
-            "id": 9,
-            "speaker": "岳母与赵公子",
-            "scale": "MEDIUM_SHOT",
-            "motion": "SHAKE",
-            "motion_name": "镜头震撼",
-            "dialogue": "龙……龙王？！你竟然是那位镇守北境的至尊龙王！",
-            "visual_prompt": "masterpiece, 8k anime vertical drama, shocked wealthy woman and young master pale with terror, dropping wine glass",
-            "image": "/api/shots/9/image",
-            "audio": "/api/shots/9/audio",
-            "sfx": "无"
-        },
-        {
-            "id": 10,
-            "speaker": "叶辰",
-            "scale": "EXTREME_CLOSE_UP",
-            "motion": "ZOOM_IN",
-            "motion_name": "镜头推进",
-            "dialogue": "犯我逆鳞者，杀无赦！",
-            "visual_prompt": "masterpiece, 8k anime extreme close-up, glowing golden dragon eyes, supreme aura, dark lightning background",
-            "image": "/api/shots/10/image",
-            "audio": "/api/shots/10/audio",
-            "sfx": "终极大爆炸 (Impact)"
-        }
-    ]
-
-    characters = [
-        {
-            "name": "叶辰 (主角)",
-            "role": "至尊龙王",
-            "voice": "云希 (磁性沉稳霸道)",
-            "avatar": "/api/shots/4/image",
-            "traits": "黑发冷眸，修罗战神之主，隐藏滔天权势"
-        },
-        {
-            "name": "岳母柳琴",
-            "role": "刁难反派",
-            "voice": "晓晓 (尖酸刻薄逼迫)",
-            "avatar": "/api/shots/2/image",
-            "traits": "翡翠旗袍，拜金势力，豪门大堂"
-        },
-        {
-            "name": "赵公子",
-            "role": "狂妄对手",
-            "voice": "云健 (嚣张跋扈)",
-            "avatar": "/api/shots/5/image",
-            "traits": "定制西装，手持红酒，自傲恶少"
-        }
-    ]
-
-    initial_data = {
-        "title": "至尊龙王归位",
-        "genre": "都市战神爽文",
-        "video_url": "/api/video/stream?mode=full",
-        "live_actor_video": "/api/video/stream?mode=live",
-        "srt_url": "/output/至尊龙王归位/至尊龙王归位.srt",
-        "duration": 61.61,
-        "characters": characters,
-        "shots": shots,
-        "audio_tracks": [
-            {"track": "人声对白轨", "status": "已对齐", "source": "Edge-TTS 神经网络多音色"},
-            {"track": "拟音音效轨 (SFX)", "status": "已注入", "source": "暴雨 + 惊雷 + 破门轰鸣 + 金铁下跪"},
-            {"track": "电影配乐轨 (BGM)", "status": "已卡点", "source": "战神觉醒史诗管弦交响"}
-        ]
+    # 默认空白工程：绝不预置任何固定小说，完全由创作者自主添加或从番茄小说导入
+    empty_data = {
+        "title": "",
+        "genre": "",
+        "video_url": "",
+        "live_actor_video": "",
+        "srt_url": "",
+        "duration": 0.0,
+        "characters": [],
+        "shots": [],
+        "audio_tracks": []
     }
-    _save_project_data(initial_data)
-    return initial_data
+    return empty_data
 
 
 def _save_project_data(data: Dict[str, Any]):
@@ -311,22 +166,15 @@ async def get_current_project():
 
 def _resolve_current_video_file(mode: str = "full") -> Path:
     data = _load_project_data()
-    title = data.get("title", "至尊龙王归位")
-    if mode == "live":
-        p = OUTPUT_DIR / title / "真人演员_叶辰_会说话.mp4"
-        if not p.exists():
-            p = OUTPUT_DIR / "至尊龙王归位" / "真人演员_叶辰_会说话.mp4"
-    else:
+    title = data.get("title", "").strip()
+    if title:
         p = OUTPUT_DIR / title / f"{title}_影视级成片.mp4"
-        if not p.exists():
-            p = OUTPUT_DIR / "至尊龙王归位" / "至尊龙王归位_影视级成片.mp4"
-    if not p.exists():
-        mp4s = list(OUTPUT_DIR.glob("**/*.mp4"))
-        if mp4s:
-            p = mp4s[0]
-        else:
-            raise HTTPException(status_code=404, detail="Video file not found")
-    return p
+        if p.exists():
+            return p
+    mp4s = [m for m in OUTPUT_DIR.glob("**/*_影视级成片.mp4")]
+    if mp4s:
+        return sorted(mp4s, key=lambda x: x.stat().st_mtime, reverse=True)[0]
+    raise HTTPException(status_code=404, detail="当前作品尚未渲染生成视频成片")
 
 
 @app.get("/api/video/stream")
@@ -340,7 +188,7 @@ async def stream_current_video(mode: str = "full"):
 async def download_current_video(mode: str = "full"):
     """供手机端或浏览器一键下载 MP4 成片到本地相册/目录."""
     data = _load_project_data()
-    title = data.get("title", "至尊龙王归位")
+    title = data.get("title", "").strip() or "AI短剧作品"
     p = _resolve_current_video_file(mode)
     return FileResponse(
         str(p),
@@ -350,26 +198,54 @@ async def download_current_video(mode: str = "full"):
 
 
 @app.get("/api/shots/{shot_id}/audio")
-async def get_shot_audio(shot_id: int):
-    """获取指定分镜的真实配音音频."""
+async def get_shot_audio(shot_id: int, text: Optional[str] = None, speaker: Optional[str] = None):
+    """获取指定分镜的真实配音音频（若尚未生成则实时调用 Edge-TTS 合成，确保试听 100% 有效）."""
     data = _load_project_data()
-    title = data.get("title", "至尊龙王归位")
-    audio_path = OUTPUT_DIR / title / "shots" / f"shot_{shot_id:03d}.mp3"
-    if not audio_path.exists():
-        audio_path = OUTPUT_DIR / "至尊龙王归位" / "shots" / f"shot_{shot_id:03d}.mp3"
-    if not audio_path.exists():
+    title = data.get("title", "").strip() or "temp_preview"
+    shots_dir = OUTPUT_DIR / title / "shots"
+    shots_dir.mkdir(parents=True, exist_ok=True)
+    audio_path = shots_dir / f"shot_{shot_id:03d}.mp3"
+
+    target_shot = None
+    for s in data.get("shots", []):
+        if int(s.get("id", 0)) == shot_id:
+            target_shot = s
+            break
+
+    dialogue_text = (text or (target_shot.get("dialogue", "") if target_shot else "")).strip()
+    speaker_name = (speaker or (target_shot.get("speaker", "旁白") if target_shot else "旁白")).strip()
+
+    if (not audio_path.exists() or audio_path.stat().st_size < 100 or text) and dialogue_text:
+        try:
+            from omnidrama.core.tts_engine import TTSEngine
+        except ImportError:
+            from core.tts_engine import TTSEngine
+        tts_engine = TTSEngine()
+        voice_code = _resolve_character_voice_code(speaker_name, data.get("characters", []))
+        await tts_engine.generate_speech(
+            text=dialogue_text,
+            voice=voice_code,
+            output_path=str(audio_path)
+        )
+
+    if not audio_path.exists() or audio_path.stat().st_size == 0:
         raise HTTPException(status_code=404, detail=f"Audio for shot {shot_id} not found")
     return FileResponse(str(audio_path), media_type="audio/mpeg")
 
 
 @app.get("/api/shots/{shot_id}/image")
 async def get_shot_image(shot_id: int):
-    """获取指定分镜的真实剧照立绘."""
+    """获取指定分镜的真实剧照立绘（若尚未生成则实时绘制预览帧）."""
     data = _load_project_data()
-    title = data.get("title", "至尊龙王归位")
-    img_path = OUTPUT_DIR / title / "shots" / f"shot_{shot_id:03d}.jpg"
+    title = data.get("title", "").strip() or "temp_preview"
+    shots_dir = OUTPUT_DIR / title / "shots"
+    shots_dir.mkdir(parents=True, exist_ok=True)
+    img_path = shots_dir / f"shot_{shot_id:03d}.jpg"
     if not img_path.exists():
-        img_path = OUTPUT_DIR / "至尊龙王归位" / "shots" / f"shot_{shot_id:03d}.jpg"
+        for s in data.get("shots", []):
+            if int(s.get("id", 0)) == shot_id:
+                await _generate_single_shot_visual(s, shots_dir)
+                break
     if not img_path.exists():
         raise HTTPException(status_code=404, detail=f"Image for shot {shot_id} not found")
     return FileResponse(str(img_path), media_type="image/jpeg")
@@ -1456,3 +1332,38 @@ async def split_novel_endpoint(req: SplitNovelRequest):
     mgr = _get_series_manager()
     episodes = mgr.auto_split_novel(req.novel_text, req.chars_per_episode or 600)
     return {"status": "success", "count": len(episodes), "episodes": episodes}
+
+
+class FanqieImportRequest(BaseModel):
+    url_or_id: str
+
+
+@app.get("/api/fanqie/rank")
+async def get_fanqie_rank(limit: int = 8):
+    """实时抓取番茄小说 (fanqienovel.com) 热门排行榜单."""
+    import asyncio
+    try:
+        from omnidrama.providers.fanqie_provider import FanqieProvider
+    except ImportError:
+        from providers.fanqie_provider import FanqieProvider
+    try:
+        books = await asyncio.to_thread(FanqieProvider.fetch_rank_books, limit)
+        return {"status": "success", "books": books}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"获取番茄小说热榜失败: {str(e)}")
+
+
+@app.post("/api/fanqie/import")
+async def import_fanqie_book(req: FanqieImportRequest):
+    """解析用户输入的番茄小说链接或 book_id 提取书名、题材标签、简介及首章正文."""
+    import asyncio
+    try:
+        from omnidrama.providers.fanqie_provider import FanqieProvider
+    except ImportError:
+        from providers.fanqie_provider import FanqieProvider
+    try:
+        book = await asyncio.to_thread(FanqieProvider.fetch_book_by_url_or_id, req.url_or_id)
+        return {"status": "success", "book": book}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+

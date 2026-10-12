@@ -1,12 +1,12 @@
 package com.omnidrama.app.data.model
 
 data class ProjectData(
-    val title: String = "至尊龙王归位",
-    val genre: String = "都市战神爽文",
+    val title: String = "",
+    val genre: String = "",
     val video_url: String = "",
     val live_actor_video: String = "",
     val srt_url: String = "",
-    val duration: Double = 61.61,
+    val duration: Double = 0.0,
     val characters: List<CharacterItem> = emptyList(),
     val shots: List<ShotItem> = emptyList(),
     val audio_tracks: List<AudioTrackItem> = emptyList()
@@ -45,8 +45,8 @@ data class SotaStatusResponse(
 )
 
 data class SystemStatus(
-    val os: String = "Windows",
-    val ffmpeg: Boolean = true,
+    val os: String = "未连接远程机房",
+    val ffmpeg: Boolean = false,
     val jianying_installed: Boolean = false,
     val jianying_draft_path: String = ""
 )
@@ -76,4 +76,15 @@ data class RenderStatusResponse(
     val logs: List<String> = emptyList(),
     val video_url: String = "",
     val error: String? = null
+)
+
+data class FanqieBookItem(
+    val book_id: String = "",
+    val title: String = "",
+    val author: String = "",
+    val genre: String = "",
+    val abstract: String = "",
+    val first_chapter_title: String = "",
+    val story_text: String = "",
+    val url: String = ""
 )

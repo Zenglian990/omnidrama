@@ -24,15 +24,17 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
+import com.omnidrama.app.data.local.LocalAndroidEngine
+import com.omnidrama.app.data.model.ProjectData
 import com.omnidrama.app.data.model.RenderStatusResponse
 import com.omnidrama.app.data.repository.DramaRepository
-import com.omnidrama.app.ui.theme.*
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 @Composable
 fun ProductionStudioDialog(
     serverUrl: String,
+    project: ProjectData,
     title: String,
     genre: String,
     onFinished: (videoUrl: String) -> Unit,
@@ -46,31 +48,66 @@ fun ProductionStudioDialog(
         mutableStateOf(
             RenderStatusResponse(
                 is_rendering = true,
-                progress = 2,
+                progress = 5,
                 step_index = 1,
-                current_step = "正在连接算力服务器 ($serverUrl) 启动真实渲染...",
-                logs = listOf("🚀 正在向后端算力机房下达真实渲染指令...")
+                current_step = "正在检测远程算力机房与手机独立硬件编码器...",
+                logs = listOf("🚀 启动《$title》全链路真实成片渲染引擎...")
             )
         )
     }
 
     var isComplete by remember { mutableStateOf(false) }
     var hasError by remember { mutableStateOf(false) }
+    var usingLocalEngine by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
 
-    // 100% 真实轮询制片机房状态 (绝不伪造离线假进度)
-    LaunchedEffect(Unit) {
-        val started = repo.triggerRender(serverUrl, title, genre)
-        if (!started) {
+    suspend fun runPhoneHardwareRender() {
+        usingLocalEngine = true
+        val logsList = renderStatus.logs.toMutableList()
+        logsList.add("📱 远程隧道未连接，已自动切换至【手机原生 MediaCodec H.264 硬件制片引擎】！")
+        renderStatus = renderStatus.copy(
+            is_rendering = true,
+            progress = 10,
+            current_step = "📱 手机原生硬件引擎：正在准备分镜与API直连...",
+            logs = logsList.toList()
+        )
+        val mp4Path = LocalAndroidEngine.renderFullMp4OnPhone(
+            context = context,
+            project = project,
+            onProgress = { prog, stepText, newLog ->
+                logsList.add(newLog)
+                renderStatus = renderStatus.copy(
+                    is_rendering = prog < 100,
+                    progress = prog,
+                    current_step = stepText,
+                    logs = logsList.toList()
+                )
+            }
+        )
+        if (mp4Path != null) {
+            renderStatus = renderStatus.copy(
+                is_rendering = false,
+                progress = 100,
+                current_step = "✅ 手机端 720×1280 H.264 MP4 成片压制完成！",
+                video_url = mp4Path,
+                logs = logsList.toList()
+            )
+            isComplete = true
+        } else {
             hasError = true
             renderStatus = renderStatus.copy(
                 is_rendering = false,
-                current_step = "❌ 无法连接后端算力服务器，请检查右上角设置中的服务地址",
-                logs = renderStatus.logs + listOf(
-                    "❌ 连接失败：无法访问 $serverUrl/api/project/render",
-                    "💡 请确认后端 FastAPI 服务与隧道处于运行状态后重试。"
-                )
+                current_step = "❌ 视频硬件编码失败，请先添加作品分镜后重试",
+                logs = logsList + "❌ 未检测到有效分镜，请先添加小说作品并拆解分镜。"
             )
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        val started = repo.triggerRender(serverUrl, title, genre)
+        if (!started) {
+            // 无缝切换至手机原生 MediaCodec 硬件渲染，绝不卡死在 2%！
+            runPhoneHardwareRender()
             return@LaunchedEffect
         }
 
@@ -83,7 +120,8 @@ fun ProductionStudioDialog(
                 failCount = 0
                 renderStatus = status
                 if (status.error != null) {
-                    hasError = true
+                    // 如果远程渲染异常，自动由手机硬件引擎兜底完成
+                    runPhoneHardwareRender()
                     finished = true
                 } else if (status.progress >= 100 || (!status.is_rendering && status.progress > 0)) {
                     finished = true
@@ -91,29 +129,22 @@ fun ProductionStudioDialog(
                 }
             } else {
                 failCount++
-                if (failCount >= 8) {
-                    hasError = true
+                if (failCount >= 3) {
+                    // 远程轮询中断时立即切换手机本地硬件编码完成制作
+                    runPhoneHardwareRender()
                     finished = true
-                    renderStatus = renderStatus.copy(
-                        is_rendering = false,
-                        current_step = "❌ 与算力服务器连接中断",
-                        logs = renderStatus.logs + listOf("❌ 连续多次轮询服务器无响应，请检查网络连接。")
-                    )
                 }
             }
         }
     }
 
-    // 日志自动滚动到底部
     LaunchedEffect(renderStatus.logs.size) {
         if (renderStatus.logs.isNotEmpty()) {
             listState.animateScrollToItem(renderStatus.logs.size - 1)
         }
     }
 
-    Dialog(onDismissRequest = {
-        onDismiss()
-    }) {
+    Dialog(onDismissRequest = { onDismiss() }) {
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -157,13 +188,13 @@ fun ProductionStudioDialog(
                         Spacer(modifier = Modifier.width(10.dp))
                         Column {
                             Text(
-                                text = "曾练 AI 真实制片机房",
+                                text = if (usingLocalEngine) "手机原生 H.264 制片引擎" else "曾练 AI 真实制片机房",
                                 color = Color.White,
                                 fontSize = 16.sp,
                                 fontWeight = FontWeight.Black
                             )
                             Text(
-                                text = "实时同步服务器 Edge-TTS / LLM / FFmpeg 真实进度",
+                                text = if (usingLocalEngine) "手机直连 SiliconFlow / Pexels + MediaCodec 硬件压制" else "实时同步远程 FFmpeg / Edge-TTS 真实进度",
                                 color = Color(0xFF00F2FE),
                                 fontSize = 10.sp
                             )
@@ -192,7 +223,7 @@ fun ProductionStudioDialog(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text(
-                                text = "剧目:《$title》",
+                                text = "作品:《${title.ifBlank { "未命名作品" }}》",
                                 color = Color(0xFFFFDF70),
                                 fontSize = 13.sp,
                                 fontWeight = FontWeight.Bold
@@ -245,11 +276,11 @@ fun ProductionStudioDialog(
                 Spacer(modifier = Modifier.height(6.dp))
 
                 val steps = listOf(
-                    Triple("导演分镜引擎", "DeepSeek / 硅基流动 / Gemini 拆解分镜", renderStatus.progress >= 20),
-                    Triple("分镜画面合成", "硅基流动 FLUX.1 / Pexels 实景 / PIL 帧绘制", renderStatus.progress >= 45),
-                    Triple("多角色配音", "ElevenLabs / 微软 Edge-TTS 语音合成", renderStatus.progress >= 70),
-                    Triple("母带混音棚", "FFmpeg 人声+雷雨音效+交响BGM混音", renderStatus.progress >= 85),
-                    Triple("双层防变形压制", "FFmpeg 运镜与静止字幕分层压制 MP4", renderStatus.progress >= 100)
+                    Triple("导演分镜引擎", "DeepSeek / 硅基流动 / 剧本智能拆解", renderStatus.progress >= 20),
+                    Triple("分镜画面合成", "硅基流动 FLUX.1 / Pexels / 720P 高清帧绘制", renderStatus.progress >= 45),
+                    Triple("多角色配音", "云端神经语音 / Android 原生中文 TTS 引擎", renderStatus.progress >= 70),
+                    Triple("2.5D 运镜合成", "推镜/拉镜/摇镜动态帧序列与防变形双层字幕", renderStatus.progress >= 85),
+                    Triple("H.264 视频压制", "720×1280 竖屏成片 MP4 封装入库", renderStatus.progress >= 100)
                 )
 
                 Column(
@@ -271,7 +302,7 @@ fun ProductionStudioDialog(
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
+                            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
                                 Box(
                                     modifier = Modifier
                                         .size(16.dp)
@@ -293,10 +324,10 @@ fun ProductionStudioDialog(
                                 Spacer(modifier = Modifier.width(8.dp))
                                 Text(role, color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                                 Spacer(modifier = Modifier.width(6.dp))
-                                Text(desc, color = Color(0xFF94A3B8), fontSize = 9.5.sp)
+                                Text(desc, color = Color(0xFF94A3B8), fontSize = 9.sp, maxLines = 1)
                             }
                             Text(
-                                text = if (done) "已完成" else "执行中/待处理",
+                                text = if (done) "已完成" else "进行中",
                                 color = if (done) Color(0xFF10B981) else Color(0xFF64748B),
                                 fontSize = 10.sp,
                                 fontWeight = FontWeight.Bold
@@ -309,7 +340,7 @@ fun ProductionStudioDialog(
 
                 // 实时控制台终端日志
                 Text(
-                    text = "算力服务器实时执行日志",
+                    text = "制片引擎实时执行日志",
                     color = Color(0xFF94A3B8),
                     fontSize = 11.sp,
                     fontWeight = FontWeight.Bold,
@@ -368,17 +399,22 @@ fun ProductionStudioDialog(
                         Button(
                             onClick = {
                                 scope.launch {
-                                    Toast.makeText(context, "正在注入剪映草稿箱...", Toast.LENGTH_SHORT).show()
-                                    val msg = repo.exportJianying(serverUrl)
-                                    Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
+                                    if (usingLocalEngine && renderStatus.video_url.startsWith("/")) {
+                                        val msg = LocalAndroidEngine.exportLocalMp4ToMovies(context, renderStatus.video_url, title)
+                                        Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
+                                    } else {
+                                        Toast.makeText(context, "正在注入剪映草稿箱...", Toast.LENGTH_SHORT).show()
+                                        val msg = repo.exportJianying(serverUrl)
+                                        Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
+                                    }
                                 }
                             },
                             colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFFB800)),
                             shape = RoundedCornerShape(10.dp)
                         ) {
-                            Icon(imageVector = Icons.Default.ContentCut, contentDescription = null, tint = Color(0xFF0C101A))
+                            Icon(imageVector = Icons.Default.Download, contentDescription = null, tint = Color(0xFF0C101A))
                             Spacer(modifier = Modifier.width(4.dp))
-                            Text("剪映导出", color = Color(0xFF0C101A), fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                            Text(if (usingLocalEngine) "保存至相册" else "剪映导出", color = Color(0xFF0C101A), fontWeight = FontWeight.Bold, fontSize = 12.sp)
                         }
                     }
                 } else if (hasError) {
@@ -402,7 +438,7 @@ fun ProductionStudioDialog(
                             strokeWidth = 2.dp
                         )
                         Spacer(modifier = Modifier.width(8.dp))
-                        Text("后端 FFmpeg / 语音引擎真实渲染中，请稍候...", color = Color(0xFF94A3B8), fontSize = 11.sp)
+                        Text("真实渲染压制中，请稍候...", color = Color(0xFF94A3B8), fontSize = 11.sp)
                     }
                 }
             }

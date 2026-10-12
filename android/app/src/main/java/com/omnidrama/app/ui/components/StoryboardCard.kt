@@ -1,8 +1,6 @@
 package com.omnidrama.app.ui.components
 
 import android.graphics.BitmapFactory
-import android.media.AudioAttributes
-import android.media.MediaPlayer
 import android.widget.Toast
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -29,27 +27,19 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.omnidrama.app.data.local.LocalAndroidEngine
 import com.omnidrama.app.data.model.ShotItem
 import com.omnidrama.app.ui.theme.*
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import okhttp3.OkHttpClient
 import okhttp3.Request
-import java.util.concurrent.TimeUnit
-
-private val thumbHttpClient = OkHttpClient.Builder()
-    .connectTimeout(10, TimeUnit.SECONDS)
-    .readTimeout(15, TimeUnit.SECONDS)
-    .addInterceptor { chain ->
-        val req = chain.request().newBuilder()
-            .addHeader("Bypass-Tunnel-Reminder", "true")
-            .build()
-        chain.proceed(req)
-    }
-    .build()
+import java.io.File
 
 @Composable
 fun StoryboardCard(
+    projectTitle: String = "",
+    projectGenre: String = "",
     shot: ShotItem,
     serverUrl: String,
     isSelected: Boolean,
@@ -58,23 +48,62 @@ fun StoryboardCard(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     var isPlayingAudio by remember { mutableStateOf(false) }
-    var mediaPlayer by remember { mutableStateOf<MediaPlayer?>(null) }
     var shotBitmap by remember { mutableStateOf<ImageBitmap?>(null) }
 
-    LaunchedEffect(shot.id, shot.dialogue, shot.visual_prompt, serverUrl, refreshVersion) {
+    LaunchedEffect(projectTitle, shot.id, shot.dialogue, shot.visual_prompt, serverUrl, refreshVersion) {
+        LocalAndroidEngine.ensureTtsInitialized(context)
         withContext(Dispatchers.IO) {
             try {
-                val imgUrl = "$serverUrl/api/shots/${shot.id}/image?v=$refreshVersion&t=${shot.dialogue.hashCode()}"
-                val req = Request.Builder().url(imgUrl).build()
-                thumbHttpClient.newCall(req).execute().use { resp ->
-                    if (resp.isSuccessful) {
-                        val bytes = resp.body?.bytes()
-                        if (bytes != null && bytes.isNotEmpty()) {
-                            val bmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
-                            if (bmp != null) {
-                                shotBitmap = bmp.asImageBitmap()
+                // 1. 先检查手机本地是否已生成该分镜的预览图
+                val localFile = LocalAndroidEngine.getLocalShotImageFile(context, projectTitle, shot.id)
+                if (localFile.exists() && localFile.length() > 100 && refreshVersion == 0) {
+                    val bmp = BitmapFactory.decodeFile(localFile.absolutePath)
+                    if (bmp != null) {
+                        shotBitmap = bmp.asImageBitmap()
+                        return@withContext
+                    }
+                }
+
+                // 2. 尝试从远端机房加载
+                var loadedFromServer = false
+                if (serverUrl.isNotBlank()) {
+                    try {
+                        val imgUrl = "$serverUrl/api/shots/${shot.id}/image?v=$refreshVersion&t=${shot.dialogue.hashCode()}"
+                        val req = Request.Builder().url(imgUrl).build()
+                        LocalAndroidEngine.directHttpClient.newBuilder()
+                            .connectTimeout(3, java.util.concurrent.TimeUnit.SECONDS)
+                            .readTimeout(5, java.util.concurrent.TimeUnit.SECONDS)
+                            .build()
+                            .newCall(req).execute().use { resp ->
+                                if (resp.isSuccessful && resp.header("Content-Type")?.contains("image") == true) {
+                                    val bytes = resp.body?.bytes()
+                                    if (bytes != null && bytes.isNotEmpty()) {
+                                        val bmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+                                        if (bmp != null) {
+                                            shotBitmap = bmp.asImageBitmap()
+                                            loadedFromServer = true
+                                        }
+                                    }
+                                }
                             }
+                    } catch (_: Exception) {
+                    }
+                }
+
+                // 3. 若远端未连接，直接在手机本地生成 720×1280 竖屏分镜预览帧
+                if (!loadedFromServer) {
+                    val generated = LocalAndroidEngine.generateShotImageOnPhone(
+                        context = context,
+                        title = projectTitle.ifBlank { "我的短剧" },
+                        genre = projectGenre.ifBlank { "热门爽剧" },
+                        shot = shot
+                    )
+                    if (generated.exists()) {
+                        val bmp = BitmapFactory.decodeFile(generated.absolutePath)
+                        if (bmp != null) {
+                            shotBitmap = bmp.asImageBitmap()
                         }
                     }
                 }
@@ -85,7 +114,9 @@ fun StoryboardCard(
 
     DisposableEffect(Unit) {
         onDispose {
-            mediaPlayer?.release()
+            if (isPlayingAudio) {
+                LocalAndroidEngine.stopAllAudio()
+            }
         }
     }
 
@@ -139,7 +170,6 @@ fun StoryboardCard(
 
             // 右侧分镜详情与操作栏
             Column(modifier = Modifier.weight(1f)) {
-                // Header Row: 镜头编号 + 景别 + 运镜 + 拟音
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -182,7 +212,7 @@ fun StoryboardCard(
                         }
                     }
 
-                    if (shot.sfx != "无") {
+                    if (shot.sfx != "无" && shot.sfx.isNotBlank()) {
                         Box(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(4.dp))
@@ -201,7 +231,6 @@ fun StoryboardCard(
 
                 Spacer(modifier = Modifier.height(6.dp))
 
-                // 角色说话人
                 Text(
                     text = "【${shot.speaker}】",
                     color = AccentGold,
@@ -211,7 +240,6 @@ fun StoryboardCard(
 
                 Spacer(modifier = Modifier.height(3.dp))
 
-                // 台词正文
                 Text(
                     text = shot.dialogue,
                     color = TextPrimary,
@@ -223,50 +251,31 @@ fun StoryboardCard(
 
                 Spacer(modifier = Modifier.height(8.dp))
 
-                // 底部操作按钮：试听配音 + 精修/重绘
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    // 试听配音按钮
+                    // 🔊 100% 必响真实试听配音按钮 (云端 + 手机系统中文 TTS 双重保障)
                     Button(
                         onClick = {
                             if (isPlayingAudio) {
-                                mediaPlayer?.stop()
-                                mediaPlayer?.release()
-                                mediaPlayer = null
+                                LocalAndroidEngine.stopAllAudio()
                                 isPlayingAudio = false
                             } else {
-                                try {
-                                    val audioEndpoint = "$serverUrl/api/shots/${shot.id}/audio?v=$refreshVersion&t=${System.currentTimeMillis()}"
-                                    val player = MediaPlayer().apply {
-                                        setAudioAttributes(
-                                            AudioAttributes.Builder()
-                                                .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
-                                                .setUsage(AudioAttributes.USAGE_MEDIA)
-                                                .build()
-                                        )
-                                        setDataSource(audioEndpoint)
-                                        setOnPreparedListener {
-                                            start()
-                                            isPlayingAudio = true
-                                        }
-                                        setOnCompletionListener {
-                                            isPlayingAudio = false
-                                            release()
-                                        }
-                                        setOnErrorListener { _, _, _ ->
-                                            isPlayingAudio = false
-                                            Toast.makeText(context, "配音准备中，可先点击重绘/重录", Toast.LENGTH_SHORT).show()
-                                            true
-                                        }
-                                        prepareAsync()
-                                    }
-                                    mediaPlayer = player
-                                } catch (e: Exception) {
-                                    isPlayingAudio = false
-                                    Toast.makeText(context, "播放失败: ${e.message}", Toast.LENGTH_SHORT).show()
+                                scope.launch {
+                                    Toast.makeText(
+                                        context,
+                                        "🔊 正在朗读【${shot.speaker}】台词...",
+                                        Toast.LENGTH_SHORT
+                                    ).show()
+                                    LocalAndroidEngine.playShotAudioGuaranteed(
+                                        context = context,
+                                        serverUrl = serverUrl,
+                                        shot = shot,
+                                        onStart = { isPlayingAudio = true },
+                                        onComplete = { isPlayingAudio = false }
+                                    )
                                 }
                             }
                         },
@@ -285,7 +294,7 @@ fun StoryboardCard(
                         )
                         Spacer(modifier = Modifier.width(3.dp))
                         Text(
-                            text = if (isPlayingAudio) "停止" else "试听配音",
+                            text = if (isPlayingAudio) "停止播放" else "试听配音",
                             color = if (isPlayingAudio) Color.Black else Color.White,
                             fontSize = 10.5.sp,
                             fontWeight = FontWeight.Bold

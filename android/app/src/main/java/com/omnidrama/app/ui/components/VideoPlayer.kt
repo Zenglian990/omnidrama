@@ -10,12 +10,13 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AddCircleOutline
 import androidx.compose.material.icons.filled.Movie
-import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -25,6 +26,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -32,15 +34,19 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.ui.PlayerView
+import java.io.File
 
 @OptIn(UnstableApi::class)
 @Composable
 fun VideoPlayer(
     videoUrl: String,
+    hasActiveProject: Boolean = false,
+    onAddWorkClick: (() -> Unit)? = null,
     onProduceClick: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
@@ -51,13 +57,15 @@ fun VideoPlayer(
 
     val exoPlayer = remember(videoUrl) {
         val httpFactory = DefaultHttpDataSource.Factory()
-            .setUserAgent("OmniDrama/1.3")
+            .setUserAgent("OmniDrama/1.6")
             .setConnectTimeoutMs(15000)
             .setReadTimeoutMs(30000)
             .setDefaultRequestProperties(mapOf("Bypass-Tunnel-Reminder" to "true"))
 
+        // DefaultDataSource.Factory 同时支持 file:// 本地 MP4 与 http/https 远程流！
+        val dataSourceFactory = DefaultDataSource.Factory(context, httpFactory)
         val mediaSourceFactory = DefaultMediaSourceFactory(context)
-            .setDataSourceFactory(httpFactory)
+            .setDataSourceFactory(dataSourceFactory)
 
         ExoPlayer.Builder(context)
             .setMediaSourceFactory(mediaSourceFactory)
@@ -65,13 +73,18 @@ fun VideoPlayer(
                 if (videoUrl.isNotBlank()) {
                     try {
                         hasError = false
-                        setMediaItem(MediaItem.fromUri(Uri.parse(videoUrl)))
+                        val uri = if (videoUrl.startsWith("/")) {
+                            Uri.fromFile(File(videoUrl))
+                        } else {
+                            Uri.parse(videoUrl)
+                        }
+                        setMediaItem(MediaItem.fromUri(uri))
                         prepare()
                         playWhenReady = true
                         repeatMode = Player.REPEAT_MODE_ONE
                     } catch (e: Exception) {
                         hasError = true
-                        errorMessage = e.localizedMessage ?: "加载异常"
+                        errorMessage = e.localizedMessage ?: "视频加载异常"
                     }
                 }
                 addListener(object : Player.Listener {
@@ -85,7 +98,7 @@ fun VideoPlayer(
                     override fun onPlayerError(error: PlaybackException) {
                         isBuffering = false
                         hasError = true
-                        errorMessage = "网络流缓冲中，点击重试"
+                        errorMessage = "成片尚未生成，请点击下方【一键制作 / 渲染全片】"
                     }
                 })
             }
@@ -120,7 +133,6 @@ fun VideoPlayer(
             )
         }
 
-        // 占位海报与引导卡片 (当视频尚未生成或正在制作时显示)
         if (videoUrl.isBlank() || hasError) {
             Column(
                 modifier = Modifier
@@ -144,9 +156,9 @@ fun VideoPlayer(
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
-                        imageVector = if (hasError) Icons.Default.Refresh else Icons.Default.Movie,
+                        imageVector = if (!hasActiveProject) Icons.Default.AddCircleOutline else if (hasError) Icons.Default.Refresh else Icons.Default.Movie,
                         contentDescription = null,
-                        tint = if (hasError) Color(0xFFFFB800) else Color(0xFF00F2FE),
+                        tint = if (!hasActiveProject) Color(0xFFFFDF70) else if (hasError) Color(0xFFFFB800) else Color(0xFF00F2FE),
                         modifier = Modifier.size(32.dp)
                     )
                 }
@@ -154,7 +166,7 @@ fun VideoPlayer(
                 Spacer(modifier = Modifier.height(16.dp))
 
                 Text(
-                    text = if (hasError) "视频流正在缓冲中" else "院线监视器就绪",
+                    text = if (!hasActiveProject) "您的作品库暂无剧目" else if (hasError) "当前作品尚未压制视频" else "院线监视器就绪",
                     color = Color.White,
                     fontSize = 16.sp,
                     fontWeight = FontWeight.Bold
@@ -163,10 +175,33 @@ fun VideoPlayer(
                 Spacer(modifier = Modifier.height(6.dp))
 
                 Text(
-                    text = if (hasError) errorMessage else "成片未渲染，请点击下方【⚡ 一键制作短剧】生成全片",
+                    text = if (!hasActiveProject) {
+                        "本产品不预留任何固定小说模板。\n请点击下方按钮从【🍅 番茄小说】导入或粘贴您喜欢的作品！"
+                    } else if (hasError) {
+                        errorMessage
+                    } else {
+                        "分镜已就绪！点击下方【⚡ 一键制作 / 渲染全片】即可生成 720×1280 竖屏短剧"
+                    },
                     color = Color(0xFF94A3B8),
-                    fontSize = 12.sp
+                    fontSize = 12.sp,
+                    textAlign = TextAlign.Center
                 )
+
+                if (!hasActiveProject && onAddWorkClick != null) {
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Button(
+                        onClick = onAddWorkClick,
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFFB800)),
+                        shape = RoundedCornerShape(10.dp)
+                    ) {
+                        Text(
+                            text = "🍅 从番茄小说导入 / 添加第一部作品",
+                            color = Color(0xFF0C101A),
+                            fontSize = 12.5.sp,
+                            fontWeight = FontWeight.ExtraBold
+                        )
+                    }
+                }
             }
         }
 
