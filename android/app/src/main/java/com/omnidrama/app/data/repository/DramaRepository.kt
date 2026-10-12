@@ -12,8 +12,8 @@ import java.util.concurrent.TimeUnit
 
 class DramaRepository {
     private val client = OkHttpClient.Builder()
-        .connectTimeout(8, TimeUnit.SECONDS)
-        .readTimeout(15, TimeUnit.SECONDS)
+        .connectTimeout(12, TimeUnit.SECONDS)
+        .readTimeout(60, TimeUnit.SECONDS)
         .addInterceptor { chain ->
             val newReq = chain.request().newBuilder()
                 .addHeader("Bypass-Tunnel-Reminder", "true")
@@ -56,6 +56,22 @@ class DramaRepository {
             // 离线回退
         }
         return@withContext getOfflineMockSota()
+    }
+
+    suspend fun saveApiKeys(baseUrl: String, keys: Map<String, String>): Boolean = withContext(Dispatchers.IO) {
+        try {
+            val payload = mapOf("keys" to keys)
+            val json = gson.toJson(payload)
+            val req = Request.Builder()
+                .url("$baseUrl/api/sota/save-keys")
+                .post(json.toRequestBody("application/json".toMediaType()))
+                .build()
+            client.newCall(req).execute().use { resp ->
+                return@withContext resp.isSuccessful
+            }
+        } catch (e: Exception) {
+            return@withContext false
+        }
     }
 
     suspend fun exportJianying(baseUrl: String): String = withContext(Dispatchers.IO) {
@@ -223,17 +239,18 @@ class DramaRepository {
     }
 
     private fun getOfflineMockSota(): SotaStatusResponse {
+        // 绝对诚实：未连接服务器或未填写 Key 时，全部显示 configured = false (未配置)
         val providers = mapOf(
-            "director" to ProviderItem("Claude 3.5 Sonnet / DeepSeek-R1", "好莱坞编剧与镜头调度总导演", "ANTHROPIC_API_KEY", true, "行业顶级 (SOTA)"),
-            "image" to ProviderItem("FLUX.1 Pro (BFL)", "8K 胶片级定妆与分镜剧照生图", "BFL_API_KEY", true, "行业顶级 (SOTA)"),
-            "video_hailuo" to ProviderItem("MiniMax 海螺 Video-01", "真人微表情、毛孔与眼神光电影级视频", "MINIMAX_API_KEY", true, "行业顶级 (SOTA)"),
-            "video_kling" to ProviderItem("快手可灵 Kling 2.0 Pro", "大动作打斗、物理交互与镜头轨迹控制", "KLING_ACCESS_KEY", true, "行业顶级 (SOTA)"),
-            "lipsync" to ProviderItem("SyncLabs Pro (Sync.so)", "毫秒级神经音画对齐与真实牙齿/舌位建模", "SYNCLABS_API_KEY", true, "行业顶级 (SOTA)"),
-            "voice" to ProviderItem("ElevenLabs Multilingual v2", "人类级呼吸喘息、轻蔑冷笑与情感爆发配音", "ELEVENLABS_API_KEY", true, "行业顶级 (SOTA)"),
-            "music" to ProviderItem("Suno v3.5 Cinematic", "汉斯·季默级影视交响配乐与悬疑氛围", "SUNO_API_KEY", true, "行业顶级 (SOTA)")
+            "deepseek" to ProviderItem("DeepSeek-V3 / R1 (深度求索)", "好莱坞编剧与十镜分镜剧本拆解总导演", "DEEPSEEK_API_KEY", false, "", "主力导演 (推荐配置)"),
+            "gemini" to ProviderItem("Google Gemini 2.0 Flash", "多模态剧本拆解与分镜视觉提示词引擎", "GEMINI_API_KEY", false, "", "高速导演 (支持免费Key)"),
+            "claude" to ProviderItem("Claude 3.5 Sonnet (Anthropic)", "殿堂级文学剧本改编与戏剧冲突调度", "ANTHROPIC_API_KEY", false, "", "行业顶级 (SOTA)"),
+            "image" to ProviderItem("FLUX.1 Pro (Black Forest Labs)", "8K 胶片级定妆与分镜剧照生图 (未配则用本地PIL漫剧合成)", "BFL_API_KEY", false, "", "行业顶级 (SOTA)"),
+            "voice" to ProviderItem("ElevenLabs Multilingual v2", "人类级呼吸感情绪配音 (未配则用内置免费 Edge-TTS)", "ELEVENLABS_API_KEY", false, "", "行业顶级 (SOTA)"),
+            "video_hailuo" to ProviderItem("MiniMax 海螺 Video-01", "真人微表情与眼神光电影级图生视频", "MINIMAX_API_KEY", false, "", "行业顶级 (SOTA)"),
+            "video_kling" to ProviderItem("快手可灵 Kling 2.0 Pro", "大动作打斗、物理交互与镜头轨迹控制", "KLING_ACCESS_KEY", false, "", "行业顶级 (SOTA)")
         )
         return SotaStatusResponse(
-            system = SystemStatus("Windows / Android", true, true, "JianyingPro Local Drafts"),
+            system = SystemStatus("离线模式 (请检查后端服务地址)", true, false, ""),
             providers = providers
         )
     }

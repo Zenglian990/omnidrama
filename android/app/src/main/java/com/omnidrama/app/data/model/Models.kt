@@ -54,8 +54,9 @@ data class ProviderItem(
     val name: String,
     val role: String,
     val env_key: String,
-    val configured: Boolean,
-    val tier: String
+    val configured: Boolean = false,
+    val masked_key: String = "",
+    val tier: String = ""
 )
 
 data class VoiceItem(
@@ -75,4 +76,3 @@ data class RenderStatusResponse(
     val video_url: String = "",
     val error: String? = null
 )
-

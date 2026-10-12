@@ -1,7 +1,6 @@
 package com.omnidrama.app.ui.components
 
 import android.widget.Toast
-import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
@@ -47,57 +46,61 @@ fun ProductionStudioDialog(
         mutableStateOf(
             RenderStatusResponse(
                 is_rendering = true,
-                progress = 5,
+                progress = 2,
                 step_index = 1,
-                current_step = "正在连接 AI 导演与制片算力机房...",
-                logs = listOf("🚀 [00:00:01] 曾练 AI 智能制片机房正在初始化...")
+                current_step = "正在连接算力服务器 ($serverUrl) 启动真实渲染...",
+                logs = listOf("🚀 正在向后端算力机房下达真实渲染指令...")
             )
         )
     }
 
     var isComplete by remember { mutableStateOf(false) }
+    var hasError by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
 
-    // 轮询制片机房状态
+    // 100% 真实轮询制片机房状态 (绝不伪造离线假进度)
     LaunchedEffect(Unit) {
-        // 先触发启动
-        repo.triggerRender(serverUrl, title, genre)
+        val started = repo.triggerRender(serverUrl, title, genre)
+        if (!started) {
+            hasError = true
+            renderStatus = renderStatus.copy(
+                is_rendering = false,
+                current_step = "❌ 无法连接后端算力服务器，请检查右上角设置中的服务地址",
+                logs = renderStatus.logs + listOf(
+                    "❌ 连接失败：无法访问 $serverUrl/api/project/render",
+                    "💡 请确认后端 FastAPI 服务与隧道处于运行状态后重试。"
+                )
+            )
+            return@LaunchedEffect
+        }
 
-        // 持续轮询直至完成
+        var failCount = 0
         var finished = false
         while (!finished) {
+            delay(1500)
             val status = repo.getRenderStatus(serverUrl)
             if (status != null) {
+                failCount = 0
                 renderStatus = status
-                if (status.progress >= 100 || (!status.is_rendering && status.progress > 0)) {
+                if (status.error != null) {
+                    hasError = true
+                    finished = true
+                } else if (status.progress >= 100 || (!status.is_rendering && status.progress > 0)) {
                     finished = true
                     isComplete = true
                 }
             } else {
-                // 若离线或网络异常，平滑本地进度推进作为可靠兜底
-                if (renderStatus.progress < 100) {
-                    val nextP = (renderStatus.progress + 20).coerceAtMost(100)
-                    val nextStep = when (nextP) {
-                        in 0..25 -> "阶段 1/5：好莱坞导演分镜与戏剧冲突拆解"
-                        in 26..50 -> "阶段 2/5：全角色 8K 漫画定妆与分镜剧照生图"
-                        in 51..75 -> "阶段 3/5：Edge-TTS 神经网络多角色配音"
-                        in 76..95 -> "阶段 4/5：三轨拟音音效与战神交响母带融合"
-                        else -> "阶段 5/5：FFmpeg 电影级动态运镜与成片压制"
-                    }
-                    val newLogs = renderStatus.logs.toMutableList()
-                    newLogs.add("⚡ [进度 ${nextP}%] $nextStep 完成")
+                failCount++
+                if (failCount >= 8) {
+                    hasError = true
+                    finished = true
                     renderStatus = renderStatus.copy(
-                        progress = nextP,
-                        current_step = nextStep,
-                        logs = newLogs
+                        is_rendering = false,
+                        current_step = "❌ 与算力服务器连接中断",
+                        logs = renderStatus.logs + listOf("❌ 连续多次轮询服务器无响应，请检查网络连接。")
                     )
-                    if (nextP >= 100) {
-                        finished = true
-                        isComplete = true
-                    }
                 }
             }
-            delay(1200)
         }
     }
 
@@ -109,7 +112,7 @@ fun ProductionStudioDialog(
     }
 
     Dialog(onDismissRequest = {
-        if (isComplete) onDismiss()
+        onDismiss()
     }) {
         Box(
             modifier = Modifier
@@ -154,27 +157,25 @@ fun ProductionStudioDialog(
                         Spacer(modifier = Modifier.width(10.dp))
                         Column {
                             Text(
-                                text = "曾练 AI 智能制片机房",
+                                text = "曾练 AI 真实制片机房",
                                 color = Color.White,
                                 fontSize = 16.sp,
                                 fontWeight = FontWeight.Black
                             )
                             Text(
-                                text = "好莱坞 SOTA 工业级全链路流水线",
+                                text = "实时同步服务器 Edge-TTS / LLM / FFmpeg 真实进度",
                                 color = Color(0xFF00F2FE),
                                 fontSize = 10.sp
                             )
                         }
                     }
 
-                    if (isComplete) {
-                        IconButton(onClick = onDismiss) {
-                            Icon(imageVector = Icons.Default.Close, contentDescription = "Close", tint = Color.White)
-                        }
+                    IconButton(onClick = onDismiss) {
+                        Icon(imageVector = Icons.Default.Close, contentDescription = "Close", tint = Color.White)
                     }
                 }
 
-                Spacer(modifier = Modifier.height(16.dp))
+                Spacer(modifier = Modifier.height(14.dp))
 
                 // 核心大进度展示
                 Box(
@@ -198,7 +199,7 @@ fun ProductionStudioDialog(
                             )
                             Text(
                                 text = "${renderStatus.progress}%",
-                                color = Color(0xFF00F2FE),
+                                color = if (hasError) Color(0xFFF87171) else Color(0xFF00F2FE),
                                 fontSize = 16.sp,
                                 fontWeight = FontWeight.Black
                             )
@@ -212,7 +213,7 @@ fun ProductionStudioDialog(
                                 .fillMaxWidth()
                                 .height(8.dp)
                                 .clip(RoundedCornerShape(4.dp)),
-                            color = Color(0xFF00F2FE),
+                            color = if (hasError) Color(0xFFF87171) else Color(0xFF00F2FE),
                             trackColor = Color(0xFF1E283D)
                         )
 
@@ -220,18 +221,22 @@ fun ProductionStudioDialog(
 
                         Text(
                             text = renderStatus.current_step,
-                            color = if (isComplete) Color(0xFF10B981) else Color(0xFF94A3B8),
+                            color = when {
+                                hasError -> Color(0xFFF87171)
+                                isComplete -> Color(0xFF10B981)
+                                else -> Color(0xFF94A3B8)
+                            },
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Medium
                         )
                     }
                 }
 
-                Spacer(modifier = Modifier.height(14.dp))
+                Spacer(modifier = Modifier.height(12.dp))
 
                 // 5大流水线工序卡片
                 Text(
-                    text = "全链路制片工序状态",
+                    text = "全链路真实渲染工序状态",
                     color = Color(0xFF94A3B8),
                     fontSize = 11.sp,
                     fontWeight = FontWeight.Bold,
@@ -240,11 +245,11 @@ fun ProductionStudioDialog(
                 Spacer(modifier = Modifier.height(6.dp))
 
                 val steps = listOf(
-                    Triple("好莱坞编剧导演", "分镜与冲突拆解", renderStatus.progress >= 20),
-                    Triple("美术总监", "8K 角色定妆与分镜生图", renderStatus.progress >= 40),
-                    Triple("录音棚", "Edge-TTS 神经网络多角色配音", renderStatus.progress >= 60),
-                    Triple("混音棚", "暴雨雷鸣拟音与交响母带", renderStatus.progress >= 80),
-                    Triple("剪辑机房", "FFmpeg 动态运镜与成片压制", renderStatus.progress >= 100)
+                    Triple("导演分镜引擎", "LLM / 规则剧本分镜拆解", renderStatus.progress >= 20),
+                    Triple("分镜画面合成", "FLUX API / PIL 竖屏漫剧帧绘制", renderStatus.progress >= 45),
+                    Triple("多角色配音", "ElevenLabs / 微软 Edge-TTS 语音合成", renderStatus.progress >= 70),
+                    Triple("母带混音棚", "FFmpeg 人声+雷雨音效+交响BGM混音", renderStatus.progress >= 85),
+                    Triple("视频合成压制", "FFmpeg 2.5D 动态运镜与 MP4 成片压制", renderStatus.progress >= 100)
                 )
 
                 Column(
@@ -288,10 +293,10 @@ fun ProductionStudioDialog(
                                 Spacer(modifier = Modifier.width(8.dp))
                                 Text(role, color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                                 Spacer(modifier = Modifier.width(6.dp))
-                                Text(desc, color = Color(0xFF94A3B8), fontSize = 10.sp)
+                                Text(desc, color = Color(0xFF94A3B8), fontSize = 9.5.sp)
                             }
                             Text(
-                                text = if (done) "已就绪" else "待处理",
+                                text = if (done) "已完成" else "执行中/待处理",
                                 color = if (done) Color(0xFF10B981) else Color(0xFF64748B),
                                 fontSize = 10.sp,
                                 fontWeight = FontWeight.Bold
@@ -304,7 +309,7 @@ fun ProductionStudioDialog(
 
                 // 实时控制台终端日志
                 Text(
-                    text = "制片机房实时指令终端",
+                    text = "算力服务器实时执行日志",
                     color = Color(0xFF94A3B8),
                     fontSize = 11.sp,
                     fontWeight = FontWeight.Bold,
@@ -329,7 +334,7 @@ fun ProductionStudioDialog(
                         items(renderStatus.logs) { log ->
                             Text(
                                 text = log,
-                                color = Color(0xFF67E8F9),
+                                color = if (log.startsWith("❌")) Color(0xFFF87171) else Color(0xFF67E8F9),
                                 fontSize = 9.5.sp,
                                 fontFamily = FontFamily.Monospace
                             )
@@ -376,6 +381,15 @@ fun ProductionStudioDialog(
                             Text("剪映导出", color = Color(0xFF0C101A), fontWeight = FontWeight.Bold, fontSize = 12.sp)
                         }
                     }
+                } else if (hasError) {
+                    Button(
+                        onClick = onDismiss,
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF334155)),
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(10.dp)
+                    ) {
+                        Text("关闭窗口", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                    }
                 } else {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -388,7 +402,7 @@ fun ProductionStudioDialog(
                             strokeWidth = 2.dp
                         )
                         Spacer(modifier = Modifier.width(8.dp))
-                        Text("好莱坞全链路渲染作业中，请稍候...", color = Color(0xFF94A3B8), fontSize = 11.sp)
+                        Text("后端 FFmpeg / 语音引擎真实渲染中，请稍候...", color = Color(0xFF94A3B8), fontSize = 11.sp)
                     }
                 }
             }

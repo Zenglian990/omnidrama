@@ -38,12 +38,16 @@ fun StudioScreen() {
     val scope = rememberCoroutineScope()
     val repo = remember { DramaRepository() }
 
-    var serverUrl by remember { mutableStateOf("https://omnidrama-zeng.loca.lt") }
+    val prefs = remember { context.getSharedPreferences("omnidrama_prefs", android.content.Context.MODE_PRIVATE) }
+    var serverUrl by remember {
+        mutableStateOf(prefs.getString("server_url", "https://omnidrama-zeng.loca.lt") ?: "https://omnidrama-zeng.loca.lt")
+    }
     var project by remember { mutableStateOf(ProjectData()) }
     var sotaInfo by remember { mutableStateOf(SotaStatusResponse()) }
     var availableVoices by remember { mutableStateOf<List<VoiceItem>>(emptyList()) }
     var isLoading by remember { mutableStateOf(false) }
     var isOnline by remember { mutableStateOf(false) }
+    var isSavingKeys by remember { mutableStateOf(false) }
 
     var selectedTab by remember { mutableIntStateOf(0) } // 0: 监视器, 1: 分镜流, 2: 角色库
     var activeVideoMode by remember { mutableStateOf("full") } // "full" or "live"
@@ -61,7 +65,7 @@ fun StudioScreen() {
         scope.launch {
             isLoading = true
             if (showToast) {
-                Toast.makeText(context, "正在连接云端服务器同步...", Toast.LENGTH_SHORT).show()
+                Toast.makeText(context, "正在连接服务器同步真实状态...", Toast.LENGTH_SHORT).show()
             }
             try {
                 val p = repo.getProject(serverUrl)
@@ -70,9 +74,14 @@ fun StudioScreen() {
                 project = p
                 sotaInfo = s
                 availableVoices = v
-                isOnline = true
+                isOnline = !s.system.os.startsWith("离线模式")
                 if (showToast) {
-                    Toast.makeText(context, "✅ 云端已同步！当前剧目:《${p.title}》", Toast.LENGTH_SHORT).show()
+                    val confCount = s.providers.values.count { it.configured }
+                    if (isOnline) {
+                        Toast.makeText(context, "✅ 已同步！当前剧目《${p.title}》，已配置 $confCount 项商业 Key", Toast.LENGTH_SHORT).show()
+                    } else {
+                        Toast.makeText(context, "⚠️ 无法连接服务器 ($serverUrl)，当前为本地缓存模式", Toast.LENGTH_LONG).show()
+                    }
                 }
             } catch (e: Exception) {
                 isOnline = false
@@ -158,15 +167,18 @@ fun StudioScreen() {
                             }
                         }
 
-                        // 设置按钮
+                        // 设置按钮 (点击时同步最新真实 Key 状态)
                         IconButton(
-                            onClick = { showSotaDialog = true },
+                            onClick = {
+                                refreshData(showToast = false)
+                                showSotaDialog = true
+                            },
                             modifier = Modifier.size(32.dp)
                         ) {
                             Icon(
                                 imageVector = Icons.Default.Settings,
                                 contentDescription = "Settings",
-                                tint = TextSecondary,
+                                tint = AccentGold,
                                 modifier = Modifier.size(18.dp)
                             )
                         }
@@ -662,14 +674,48 @@ fun StudioScreen() {
         )
     }
 
-    // SOTA 设置弹窗
+    // 真实 API 密钥与引擎设置弹窗
     if (showSotaDialog) {
         SotaEngineDialog(
             sotaInfo = sotaInfo,
             currentServerUrl = serverUrl,
-            onSaveServerUrl = {
-                serverUrl = it
-                refreshData(showToast = true)
+            isSaving = isSavingKeys,
+            onSaveConfig = { newUrl, apiKeys ->
+                scope.launch {
+                    isSavingKeys = true
+                    serverUrl = newUrl
+                    prefs.edit().putString("server_url", newUrl).apply()
+
+                    var savedOk = true
+                    if (apiKeys.isNotEmpty()) {
+                        savedOk = repo.saveApiKeys(newUrl, apiKeys)
+                    }
+                    val s = repo.getSotaStatus(newUrl)
+                    val p = repo.getProject(newUrl)
+                    sotaInfo = s
+                    project = p
+                    isOnline = !s.system.os.startsWith("离线模式")
+                    isSavingKeys = false
+
+                    if (apiKeys.isNotEmpty()) {
+                        if (savedOk && isOnline) {
+                            Toast.makeText(
+                                context,
+                                "✅ 已成功保存 ${apiKeys.size} 项真实 API 密钥至服务器！",
+                                Toast.LENGTH_LONG
+                            ).show()
+                        } else {
+                            Toast.makeText(
+                                context,
+                                "⚠️ 密钥保存失败：无法连接服务器 ($newUrl)，请检查服务地址",
+                                Toast.LENGTH_LONG
+                            ).show()
+                        }
+                    } else {
+                        showSotaDialog = false
+                        refreshData(showToast = true)
+                    }
+                }
             },
             onDismiss = { showSotaDialog = false }
         )
