@@ -12,7 +12,35 @@ import aiohttp.connector
 aiohttp.connector.DefaultResolver = aiohttp.resolver.ThreadedResolver
 
 import edge_tts
+import edge_tts.constants
+import edge_tts.communicate
+import edge_tts.drm
+from datetime import timezone as _tz
+from email.utils import parsedate_to_datetime as _parsedate_to_datetime
 from omnidrama.schemas.drama_schema import Shot
+
+# 2026-10 微软 Edge-TTS 403 修复补丁：
+# 旧版 speech.platform.bing.com WebSocket 合成端点已于 2026 年 10 月拒绝请求 (403)，
+# 切换至 Edge 155+ 最新官方网关 api.msedgeservices.com，并修复中文 Windows 下 Date Header 解析失败问题。
+_NEW_WSS_URL = (
+    "wss://api.msedgeservices.com/tts/cognitiveservices/websocket/v1"
+    f"?Ocp-Apim-Subscription-Key={edge_tts.constants.TRUSTED_CLIENT_TOKEN}"
+)
+edge_tts.constants.WSS_URL = _NEW_WSS_URL
+edge_tts.communicate.WSS_URL = _NEW_WSS_URL
+
+
+def _safe_parse_rfc2616_date(date: str) -> Optional[float]:
+    try:
+        parsed = _parsedate_to_datetime(date)
+    except (TypeError, ValueError, IndexError):
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=_tz.utc)
+    return parsed.timestamp()
+
+
+edge_tts.drm.DRM.parse_rfc2616_date = staticmethod(_safe_parse_rfc2616_date)
 
 
 class TTSEngine:

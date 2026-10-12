@@ -23,14 +23,40 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import android.app.DownloadManager
+import android.content.Context
+import android.net.Uri
+import android.os.Environment
 import com.omnidrama.app.data.model.CharacterItem
 import com.omnidrama.app.data.model.ProjectData
+import com.omnidrama.app.data.model.ShotItem
 import com.omnidrama.app.data.model.SotaStatusResponse
 import com.omnidrama.app.data.model.VoiceItem
 import com.omnidrama.app.data.repository.DramaRepository
 import com.omnidrama.app.ui.components.*
 import com.omnidrama.app.ui.theme.*
 import kotlinx.coroutines.launch
+
+fun downloadVideoToPhone(context: Context, serverUrl: String, title: String, mode: String = "full") {
+    try {
+        val downloadUrl = "$serverUrl/api/video/download?mode=$mode&t=${System.currentTimeMillis()}"
+        val fileName = "${title}_曾练AI短剧成片_${System.currentTimeMillis() % 10000}.mp4"
+        val request = DownloadManager.Request(Uri.parse(downloadUrl))
+            .setTitle("正在下载《$title》短剧成片")
+            .setDescription("保存至手机相册 Movies 目录: $fileName")
+            .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
+            .setDestinationInExternalPublicDir(Environment.DIRECTORY_MOVIES, fileName)
+            .addRequestHeader("Bypass-Tunnel-Reminder", "true")
+            .setAllowedOverMetered(true)
+            .setAllowedOverRoaming(true)
+
+        val dm = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
+        dm.enqueue(request)
+        Toast.makeText(context, "📥 已开始下载《$title》成片至手机相册 (Movies)！请查看顶部通知栏进度", Toast.LENGTH_LONG).show()
+    } catch (e: Exception) {
+        Toast.makeText(context, "下载启动失败: ${e.localizedMessage}", Toast.LENGTH_LONG).show()
+    }
+}
 
 @Composable
 fun StudioScreen() {
@@ -60,6 +86,10 @@ fun StudioScreen() {
     var editingCharacter by remember { mutableStateOf<CharacterItem?>(null) }
     var showGenerateScriptDialog by remember { mutableStateOf(false) }
     var isGeneratingScript by remember { mutableStateOf(false) }
+
+    var editingShot by remember { mutableStateOf<ShotItem?>(null) }
+    var isSavingShot by remember { mutableStateOf(false) }
+    var shotRefreshVersion by remember { mutableIntStateOf(0) }
 
     fun refreshData(showToast: Boolean = false) {
         scope.launch {
@@ -383,41 +413,63 @@ fun StudioScreen() {
 
                         Spacer(modifier = Modifier.height(12.dp))
 
-                        // ⭐ 核心英雄按钮：一键开始制作短剧 / 渲染全片 ⭐
-                        Button(
-                            onClick = { showProductionStudioDialog = true },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(48.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = Color.Transparent),
-                            contentPadding = PaddingValues(0.dp),
-                            shape = RoundedCornerShape(12.dp)
+                        // ⭐ 核心英雄按钮栏：一键开始制作短剧 + 一键下载成片到手机相册 ⭐
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            Box(
+                            Button(
+                                onClick = { showProductionStudioDialog = true },
                                 modifier = Modifier
-                                    .fillMaxSize()
-                                    .background(
-                                        Brush.horizontalGradient(
-                                            listOf(Color(0xFFFFDF70), Color(0xFFFFB800), Color(0xFF00F2FE))
-                                        )
-                                    ),
-                                contentAlignment = Alignment.Center
+                                    .weight(1f)
+                                    .height(48.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = Color.Transparent),
+                                contentPadding = PaddingValues(0.dp),
+                                shape = RoundedCornerShape(12.dp)
                             ) {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Icon(
-                                        imageVector = Icons.Default.AutoAwesome,
-                                        contentDescription = null,
-                                        tint = Color(0xFF0C101A),
-                                        modifier = Modifier.size(18.dp)
-                                    )
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    Text(
-                                        text = "⚡ 一键开始制作短剧 / 渲染全片",
-                                        color = Color(0xFF0C101A),
-                                        fontSize = 14.sp,
-                                        fontWeight = FontWeight.Black
-                                    )
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .background(
+                                            Brush.horizontalGradient(
+                                                listOf(Color(0xFFFFDF70), Color(0xFFFFB800), Color(0xFF00F2FE))
+                                            )
+                                        ),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(
+                                            imageVector = Icons.Default.AutoAwesome,
+                                            contentDescription = null,
+                                            tint = Color(0xFF0C101A),
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text(
+                                            text = "⚡ 一键制作 / 渲染全片",
+                                            color = Color(0xFF0C101A),
+                                            fontSize = 13.sp,
+                                            fontWeight = FontWeight.Black
+                                        )
+                                    }
                                 }
+                            }
+
+                            Button(
+                                onClick = {
+                                    downloadVideoToPhone(context, fullVideoUrl, project.title)
+                                },
+                                modifier = Modifier.height(48.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = AccentEmerald),
+                                contentPadding = PaddingValues(horizontal = 14.dp),
+                                shape = RoundedCornerShape(12.dp)
+                            ) {
+                                Text(
+                                    text = "📥 下载成片",
+                                    color = BgDark,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Black
+                                )
                             }
                         }
 
@@ -427,8 +479,8 @@ fun StudioScreen() {
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
-                            Text("1080P · 24FPS 竖屏漫剧", color = TextMuted, fontSize = 10.sp)
-                            Text("三轨合一影视级母带 (AAC)", color = AccentEmerald, fontSize = 10.sp)
+                            Text("720×1280 · 竖屏防变形双层字幕轨", color = TextMuted, fontSize = 10.sp)
+                            Text("支持导出 MP4 至手机相册", color = AccentEmerald, fontSize = 10.sp)
                         }
                     }
                 }
@@ -450,12 +502,19 @@ fun StudioScreen() {
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Text(
-                                text = "共 ${project.shots.size} 个好莱坞分镜镜头",
-                                color = BrandCyan,
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Bold
-                            )
+                            Column {
+                                Text(
+                                    text = "共 ${project.shots.size} 个好莱坞分镜镜头",
+                                    color = BrandCyan,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Text(
+                                    text = "点击任一分镜可改词、修改提示词并单独重绘画面",
+                                    color = TextMuted,
+                                    fontSize = 9.sp
+                                )
+                            }
 
                             Button(
                                 onClick = { showProductionStudioDialog = true },
@@ -466,7 +525,7 @@ fun StudioScreen() {
                             ) {
                                 Icon(Icons.Default.PlayArrow, contentDescription = null, tint = BgDark, modifier = Modifier.size(13.dp))
                                 Spacer(modifier = Modifier.width(3.dp))
-                                Text("启动全片制作", color = BgDark, fontSize = 11.sp, fontWeight = FontWeight.Black)
+                                Text("合成全片", color = BgDark, fontSize = 11.sp, fontWeight = FontWeight.Black)
                             }
                         }
 
@@ -480,9 +539,10 @@ fun StudioScreen() {
                                 StoryboardCard(
                                     shot = shot,
                                     serverUrl = serverUrl,
-                                    isSelected = false,
+                                    isSelected = editingShot?.id == shot.id,
+                                    refreshVersion = shotRefreshVersion,
                                     onClick = {
-                                        Toast.makeText(context, "选中分镜 #${shot.id} - ${shot.speaker}", Toast.LENGTH_SHORT).show()
+                                        editingShot = shot
                                     }
                                 )
                             }
@@ -720,4 +780,64 @@ fun StudioScreen() {
             onDismiss = { showSotaDialog = false }
         )
     }
+
+    // 🎬 单镜头精细修改与重绘弹窗 (v1.5.0 新增)
+    editingShot?.let { targetShot ->
+        ShotEditDialog(
+            shot = targetShot,
+            isSaving = isSavingShot,
+            onSaveAndRegenerate = { speaker, dialogue, visualPrompt, motion, regenImg, regenTts ->
+                scope.launch {
+                    isSavingShot = true
+                    val success = repo.updateAndRegenerateShot(
+                        baseUrl = serverUrl,
+                        shotId = targetShot.id,
+                        speaker = speaker,
+                        dialogue = dialogue,
+                        visualPrompt = visualPrompt,
+                        motion = motion,
+                        regenerateImage = regenImg,
+                        regenerateAudio = regenTts
+                    )
+                    if (success) {
+                        project = repo.getProject(serverUrl)
+                        isSavingShot = false
+                        shotRefreshVersion += 1
+                        editingShot = null
+                        Toast.makeText(
+                            context,
+                            "✅ 镜头 #${targetShot.id} 已重绘/重录完成！点击【合成全片】即可打包进视频",
+                            Toast.LENGTH_LONG
+                        ).show()
+                    } else {
+                        isSavingShot = false
+                        // 如果离线，也在本地更新内存分镜
+                        val localUpdated = project.shots.map {
+                            if (it.id == targetShot.id) {
+                                it.copy(
+                                    speaker = speaker,
+                                    dialogue = dialogue,
+                                    visual_prompt = visualPrompt,
+                                    motion = motion
+                                )
+                            } else it
+                        }
+                        project = project.copy(shots = localUpdated)
+                        editingShot = null
+                        Toast.makeText(
+                            context,
+                            "⚠️ 当前离线模式：已保存镜头 #${targetShot.id} 文字修改",
+                            Toast.LENGTH_SHORT
+                        ).show()
+                    }
+                }
+            },
+            onDismiss = {
+                if (!isSavingShot) {
+                    editingShot = null
+                }
+            }
+        )
+    }
 }
+

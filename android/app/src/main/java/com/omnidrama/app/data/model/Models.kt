@@ -21,7 +21,8 @@ data class ShotItem(
     val dialogue: String,
     val image: String,
     val audio: String,
-    val sfx: String
+    val sfx: String,
+    val visual_prompt: String = ""
 )
 
 data class CharacterItem(

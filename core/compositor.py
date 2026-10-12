@@ -1,4 +1,4 @@
-"""OmniDrama 2.5D 影视运镜与视频合成器 (基于 FFmpeg)."""
+"""OmniDrama 2.5D 影视运镜与双层字幕视频合成器 (基于 FFmpeg - 运镜与字幕分离架构)."""
 import os
 import subprocess
 import json
@@ -45,7 +45,6 @@ class VideoCompositor:
         motion_key = motion.value if isinstance(motion, CameraMotionEnum) else str(motion)
 
         if motion_key == "shake":
-            # 镜头颤抖/震撼滤镜：先略微放大，再用正弦波平移坐标
             return f"scale={self.width+40}:{self.height+40},crop={self.width}:{self.height}:20+sin(n*1.5)*10:20+cos(n*2.0)*10"
 
         if motion_key == "zoom_in":
@@ -60,7 +59,6 @@ class VideoCompositor:
         if motion_key == "pan_right":
             return f"scale=-2:{self.height*2},zoompan=z=1.15:x='(iw-iw/zoom)*(on/{total_frames})':y='(ih-ih/zoom)/2':d={total_frames}:s={self.width}x{self.height}:fps={self.fps}"
 
-        # 默认静态
         return f"scale={self.width}:{self.height}:force_original_aspect_ratio=increase,crop={self.width}:{self.height}"
 
     def render_shot(
@@ -68,30 +66,55 @@ class VideoCompositor:
         image_path: str,
         audio_path: str,
         camera_motion: CameraMotionEnum,
-        output_path: str
+        output_path: str,
+        subtitle_overlay_path: Optional[str] = None
     ) -> str:
-        """为单张分镜静图注入 2.5D 电影级运镜并与配音音轨合成单镜头 MP4."""
+        """为单张分镜原画注入 2.5D 电影级运镜，并在顶层叠加固定不动的透明字幕层."""
         os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
         duration = self.get_audio_duration(audio_path)
         total_frames = max(1, int(round(duration * self.fps)))
 
         vf_expr = self.build_video_filter(camera_motion, total_frames)
 
-        cmd = [
-            "ffmpeg", "-y",
-            "-loop", "1",
-            "-i", image_path,
-            "-i", audio_path,
-            "-vf", vf_expr,
-            "-c:v", "libx264",
-            "-tune", "stillimage",
-            "-pix_fmt", "yuv420p",
-            "-c:a", "aac",
-            "-b:a", "192k",
-            "-t", f"{duration:.3f}",
-            "-shortest",
-            output_path
-        ]
+        if subtitle_overlay_path and os.path.exists(subtitle_overlay_path):
+            filter_complex = (
+                f"[0:v]{vf_expr}[bg];"
+                f"[1:v]scale={self.width}:{self.height}[sub];"
+                f"[bg][sub]overlay=0:0[vout]"
+            )
+            cmd = [
+                "ffmpeg", "-y",
+                "-loop", "1", "-i", image_path,
+                "-i", subtitle_overlay_path,
+                "-i", audio_path,
+                "-filter_complex", filter_complex,
+                "-map", "[vout]",
+                "-map", "2:a:0",
+                "-c:v", "libx264",
+                "-tune", "stillimage",
+                "-pix_fmt", "yuv420p",
+                "-c:a", "aac",
+                "-b:a", "192k",
+                "-t", f"{duration:.3f}",
+                "-shortest",
+                output_path
+            ]
+        else:
+            cmd = [
+                "ffmpeg", "-y",
+                "-loop", "1",
+                "-i", image_path,
+                "-i", audio_path,
+                "-vf", vf_expr,
+                "-c:v", "libx264",
+                "-tune", "stillimage",
+                "-pix_fmt", "yuv420p",
+                "-c:a", "aac",
+                "-b:a", "192k",
+                "-t", f"{duration:.3f}",
+                "-shortest",
+                output_path
+            ]
 
         res = subprocess.run(
             cmd,
@@ -106,6 +129,71 @@ class VideoCompositor:
 
         return output_path
 
+    def render_video_shot(
+        self,
+        video_clip_path: str,
+        audio_path: str,
+        output_path: str,
+        subtitle_overlay_path: Optional[str] = None
+    ) -> str:
+        """将动态视频素材 (如 Pexels 实拍视频或图生视频片段) 与配音及固定透明字幕层合成为单镜 MP4."""
+        os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
+        duration = self.get_audio_duration(audio_path)
+
+        scale_crop = f"scale={self.width}:{self.height}:force_original_aspect_ratio=increase,crop={self.width}:{self.height},fps={self.fps}"
+
+        if subtitle_overlay_path and os.path.exists(subtitle_overlay_path):
+            filter_complex = (
+                f"[0:v]{scale_crop}[bg];"
+                f"[1:v]scale={self.width}:{self.height}[sub];"
+                f"[bg][sub]overlay=0:0[vout]"
+            )
+            cmd = [
+                "ffmpeg", "-y",
+                "-stream_loop", "-1", "-i", video_clip_path,
+                "-i", subtitle_overlay_path,
+                "-i", audio_path,
+                "-filter_complex", filter_complex,
+                "-map", "[vout]",
+                "-map", "2:a:0",
+                "-c:v", "libx264",
+                "-pix_fmt", "yuv420p",
+                "-c:a", "aac",
+                "-b:a", "192k",
+                "-t", f"{duration:.3f}",
+                "-shortest",
+                output_path
+            ]
+        else:
+            cmd = [
+                "ffmpeg", "-y",
+                "-stream_loop", "-1", "-i", video_clip_path,
+                "-i", audio_path,
+                "-vf", scale_crop,
+                "-map", "0:v:0",
+                "-map", "1:a:0",
+                "-c:v", "libx264",
+                "-pix_fmt", "yuv420p",
+                "-c:a", "aac",
+                "-b:a", "192k",
+                "-t", f"{duration:.3f}",
+                "-shortest",
+                output_path
+            ]
+
+        res = subprocess.run(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+            errors="replace"
+        )
+        if res.returncode != 0:
+            raise RuntimeError(f"FFmpeg render video shot failed:\n{res.stderr}")
+
+        return output_path
+
     def concatenate_clips(self, clip_paths: List[str], output_path: str) -> str:
         """无损将多个分镜视频片段拼接为完整短剧成片."""
         os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
@@ -113,7 +201,6 @@ class VideoCompositor:
         with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False, encoding="utf-8") as f:
             concat_txt = f.name
             for p in clip_paths:
-                # 兼容 Windows 路径反斜杠
                 escaped = os.path.abspath(p).replace("\\", "/")
                 f.write(f"file '{escaped}'\n")
 

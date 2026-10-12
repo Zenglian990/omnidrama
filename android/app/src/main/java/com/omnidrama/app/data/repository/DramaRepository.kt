@@ -12,7 +12,7 @@ import java.util.concurrent.TimeUnit
 
 class DramaRepository {
     private val client = OkHttpClient.Builder()
-        .connectTimeout(12, TimeUnit.SECONDS)
+        .connectTimeout(15, TimeUnit.SECONDS)
         .readTimeout(60, TimeUnit.SECONDS)
         .addInterceptor { chain ->
             val newReq = chain.request().newBuilder()
@@ -65,6 +65,38 @@ class DramaRepository {
             val req = Request.Builder()
                 .url("$baseUrl/api/sota/save-keys")
                 .post(json.toRequestBody("application/json".toMediaType()))
+                .build()
+            client.newCall(req).execute().use { resp ->
+                return@withContext resp.isSuccessful
+            }
+        } catch (e: Exception) {
+            return@withContext false
+        }
+    }
+
+    suspend fun updateAndRegenerateShot(
+        baseUrl: String,
+        shotId: Int,
+        speaker: String,
+        dialogue: String,
+        visualPrompt: String,
+        motion: String,
+        regenerateImage: Boolean,
+        regenerateAudio: Boolean
+    ): Boolean = withContext(Dispatchers.IO) {
+        try {
+            val payload = mapOf(
+                "speaker" to speaker,
+                "dialogue" to dialogue,
+                "visual_prompt" to visualPrompt,
+                "motion" to motion,
+                "regenerate_image" to regenerateImage,
+                "regenerate_audio" to regenerateAudio
+            )
+            val json = gson.toJson(payload)
+            val req = Request.Builder()
+                .url("$baseUrl/api/shots/$shotId")
+                .put(json.toRequestBody("application/json".toMediaType()))
                 .build()
             client.newCall(req).execute().use { resp ->
                 return@withContext resp.isSuccessful
@@ -205,16 +237,16 @@ class DramaRepository {
 
     private fun getOfflineMockProject(): ProjectData {
         val shots = listOf(
-            ShotItem(1, "旁白", "WIDE_SHOT", "ZOOM_IN", "镜头推进", "林家祖宅大堂，狂风骤雨拍打着雕花木窗。", "/api/shots/1/image", "/api/shots/1/audio", "暴雨环境音"),
-            ShotItem(2, "岳母柳琴", "MEDIUM_SHOT", "PAN_LEFT", "向左横移", "叶辰，入赘三年，今日若拿不出三千万，就立刻滚出林家！", "/api/shots/2/image", "/api/shots/2/audio", "无"),
-            ShotItem(3, "旁白", "CLOSE_UP", "ZOOM_IN", "镜头推进", "叶辰神色淡然，深邃的双眸中隐现寒光。", "/api/shots/3/image", "/api/shots/3/audio", "无"),
-            ShotItem(4, "叶辰", "CLOSE_UP", "ZOOM_IN", "镜头推进", "三千万？当年若非我暗中相助，林家早在三年前就已灰飞烟灭！", "/api/shots/4/image", "/api/shots/4/audio", "疾风起势 (Whoosh)"),
-            ShotItem(5, "赵公子", "MEDIUM_SHOT", "ZOOM_OUT", "镜头拉远", "哈哈哈！大言不惭的废物，也不撒泡尿照照自己是个什么东西！", "/api/shots/5/image", "/api/shots/5/audio", "无"),
-            ShotItem(6, "旁白", "FULL_SHOT", "SHAKE", "镜头震撼", "突然，天地间惊雷滚滚，整座大堂剧烈震颤！", "/api/shots/6/image", "/api/shots/6/audio", "惊雷劈裂 (Thunder)"),
-            ShotItem(7, "旁白", "FULL_SHOT", "ZOOM_OUT", "镜头拉远", "大门轰然破碎，十八位身披黑金战铠的修罗战神破门而入！", "/api/shots/7/image", "/api/shots/7/audio", "重低音轰鸣 (Impact)"),
-            ShotItem(8, "修罗战神", "CLOSE_UP", "ZOOM_IN", "镜头推进", "恭迎龙王回归！十万修罗殿众将，随时听候调遣！", "/api/shots/8/image", "/api/shots/8/audio", "金铁下跪 (Armor)"),
-            ShotItem(9, "岳母与赵公子", "MEDIUM_SHOT", "SHAKE", "镜头震撼", "龙……龙王？！你竟然是那位镇守北境的至尊龙王！", "/api/shots/9/image", "/api/shots/9/audio", "无"),
-            ShotItem(10, "叶辰", "EXTREME_CLOSE_UP", "ZOOM_IN", "镜头推进", "犯我逆鳞者，杀无赦！", "/api/shots/10/image", "/api/shots/10/audio", "终极大爆炸 (Impact)")
+            ShotItem(1, "旁白", "WIDE_SHOT", "ZOOM_IN", "镜头推进", "林家祖宅大堂，狂风骤雨拍打着雕花木窗。", "/api/shots/1/image", "/api/shots/1/audio", "暴雨环境音", "masterpiece, 8k anime vertical drama, dark luxury mansion hall, heavy rain storm"),
+            ShotItem(2, "岳母柳琴", "MEDIUM_SHOT", "PAN_LEFT", "向左横移", "叶辰，入赘三年，今日若拿不出三千万，就立刻滚出林家！", "/api/shots/2/image", "/api/shots/2/audio", "无", "masterpiece, 8k anime vertical drama, haughty wealthy middle-aged woman in emerald qipao"),
+            ShotItem(3, "旁白", "CLOSE_UP", "ZOOM_IN", "镜头推进", "叶辰神色淡然，深邃的双眸中隐现寒光。", "/api/shots/3/image", "/api/shots/3/audio", "无", "masterpiece, 8k anime close-up portrait, handsome young man with sharp cold eyes"),
+            ShotItem(4, "叶辰", "CLOSE_UP", "ZOOM_IN", "镜头推进", "三千万？当年若非我暗中相助，林家早在三年前就已灰飞烟灭！", "/api/shots/4/image", "/api/shots/4/audio", "疾风起势 (Whoosh)", "masterpiece, 8k anime vertical drama, domineering young dragon king speaking coldly"),
+            ShotItem(5, "赵公子", "MEDIUM_SHOT", "ZOOM_OUT", "镜头拉远", "哈哈哈！大言不惭的废物，也不撒泡尿照照自己是个什么东西！", "/api/shots/5/image", "/api/shots/5/audio", "无", "masterpiece, 8k anime vertical drama, arrogant rich young master in white suit holding red wine glass"),
+            ShotItem(6, "旁白", "FULL_SHOT", "SHAKE", "镜头震撼", "突然，天地间惊雷滚滚，整座大堂剧烈震颤！", "/api/shots/6/image", "/api/shots/6/audio", "惊雷劈裂 (Thunder)", "masterpiece, 8k anime vertical drama, dramatic lightning bolts striking across dark stormy sky"),
+            ShotItem(7, "旁白", "FULL_SHOT", "ZOOM_OUT", "镜头拉远", "大门轰然破碎，十八位身披黑金战铠的修罗战神破门而入！", "/api/shots/7/image", "/api/shots/7/audio", "重低音轰鸣 (Impact)", "masterpiece, 8k anime vertical drama, eighteen elite armored warriors bursting through doors"),
+            ShotItem(8, "修罗战神", "CLOSE_UP", "ZOOM_IN", "镜头推进", "恭迎龙王回归！十万修罗殿众将，随时听候调遣！", "/api/shots/8/image", "/api/shots/8/audio", "金铁下跪 (Armor)", "masterpiece, 8k anime vertical drama, armored general kneeling on one knee in respect"),
+            ShotItem(9, "岳母与赵公子", "MEDIUM_SHOT", "SHAKE", "镜头震撼", "龙……龙王？！你竟然是那位镇守北境的至尊龙王！", "/api/shots/9/image", "/api/shots/9/audio", "无", "masterpiece, 8k anime vertical drama, shocked wealthy woman and young master pale with terror"),
+            ShotItem(10, "叶辰", "EXTREME_CLOSE_UP", "ZOOM_IN", "镜头推进", "犯我逆鳞者，杀无赦！", "/api/shots/10/image", "/api/shots/10/audio", "终极大爆炸 (Impact)", "masterpiece, 8k anime extreme close-up, glowing golden dragon eyes, supreme aura")
         )
         val chars = listOf(
             CharacterItem("叶辰 (主角)", "至尊龙王", "云希 (磁性沉稳霸道)", "/api/shots/4/image", "黑发冷眸，修罗战神之主，隐藏滔天权势"),
@@ -239,15 +271,14 @@ class DramaRepository {
     }
 
     private fun getOfflineMockSota(): SotaStatusResponse {
-        // 绝对诚实：未连接服务器或未填写 Key 时，全部显示 configured = false (未配置)
         val providers = mapOf(
-            "deepseek" to ProviderItem("DeepSeek-V3 / R1 (深度求索)", "好莱坞编剧与十镜分镜剧本拆解总导演", "DEEPSEEK_API_KEY", false, "", "主力导演 (推荐配置)"),
-            "gemini" to ProviderItem("Google Gemini 2.0 Flash", "多模态剧本拆解与分镜视觉提示词引擎", "GEMINI_API_KEY", false, "", "高速导演 (支持免费Key)"),
-            "claude" to ProviderItem("Claude 3.5 Sonnet (Anthropic)", "殿堂级文学剧本改编与戏剧冲突调度", "ANTHROPIC_API_KEY", false, "", "行业顶级 (SOTA)"),
-            "image" to ProviderItem("FLUX.1 Pro (Black Forest Labs)", "8K 胶片级定妆与分镜剧照生图 (未配则用本地PIL漫剧合成)", "BFL_API_KEY", false, "", "行业顶级 (SOTA)"),
-            "voice" to ProviderItem("ElevenLabs Multilingual v2", "人类级呼吸感情绪配音 (未配则用内置免费 Edge-TTS)", "ELEVENLABS_API_KEY", false, "", "行业顶级 (SOTA)"),
-            "video_hailuo" to ProviderItem("MiniMax 海螺 Video-01", "真人微表情与眼神光电影级图生视频", "MINIMAX_API_KEY", false, "", "行业顶级 (SOTA)"),
-            "video_kling" to ProviderItem("快手可灵 Kling 2.0 Pro", "大动作打斗、物理交互与镜头轨迹控制", "KLING_ACCESS_KEY", false, "", "行业顶级 (SOTA)")
+            "siliconflow" to ProviderItem("🔥 硅基流动 SiliconFlow (国内免绑卡首选)", "一个Key同时开启：免费 FLUX.1 逐镜真实生图 + DeepSeek/Qwen 导演剧本拆解", "SILICONFLOW_API_KEY", false, "", "国内免费生图+导演"),
+            "deepseek" to ProviderItem("DeepSeek-V3 / R1 (深度求索官方)", "好莱坞编剧与十镜分镜剧本拆解总导演", "DEEPSEEK_API_KEY", false, "", "主力导演 (国内直连)"),
+            "pexels" to ProviderItem("Pexels 免费高清视频/图片素材库", "对标 MoneyPrinterTurbo：0元免绑卡自动匹配下载 9:16 竖屏高清实拍素材", "PEXELS_API_KEY", false, "", "免费动态视频素材"),
+            "kimi" to ProviderItem("Kimi (月之暗面 Moonshot AI)", "长篇网文理解、剧本台词打磨与镜头关键词提炼", "MOONSHOT_API_KEY", false, "", "国内直连 (SOTA)"),
+            "gemini" to ProviderItem("Google Gemini 2.0 Flash", "多模态剧本拆解与分镜视觉提示词引擎", "GEMINI_API_KEY", false, "", "高速导演"),
+            "image" to ProviderItem("FLUX.1 Pro (Black Forest Labs)", "8K 胶片级定妆与分镜剧照生图 (海外官方)", "BFL_API_KEY", false, "", "行业顶级 (SOTA)"),
+            "voice" to ProviderItem("ElevenLabs Multilingual v2", "人类级呼吸感情绪配音 (未配则用内置免费微软 Edge-TTS)", "ELEVENLABS_API_KEY", false, "", "行业顶级 (SOTA)")
         )
         return SotaStatusResponse(
             system = SystemStatus("离线模式 (请检查后端服务地址)", true, false, ""),

@@ -1,6 +1,7 @@
-"""OmniDrama 可视化导演工作台 Web 后端 (FastAPI - 100% 真实 API 驱动与真机渲染版)."""
+"""OmniDrama 可视化导演工作台 Web 后端 (FastAPI - v1.5.0 深度对标 MoneyPrinterTurbo 升级版)."""
 import os
 import json
+import math
 import shutil
 import subprocess
 import tempfile
@@ -23,9 +24,11 @@ FFMPEG_WINGET_BIN = r"C:\Users\Asus\AppData\Local\Microsoft\WinGet\Packages\Gyan
 if os.path.exists(FFMPEG_WINGET_BIN) and FFMPEG_WINGET_BIN not in os.environ.get("PATH", ""):
     os.environ["PATH"] = FFMPEG_WINGET_BIN + os.pathsep + os.environ.get("PATH", "")
 
-
 MANAGED_PROVIDER_KEYS = [
+    "SILICONFLOW_API_KEY",
     "DEEPSEEK_API_KEY",
+    "PEXELS_API_KEY",
+    "MOONSHOT_API_KEY",
     "GEMINI_API_KEY",
     "ANTHROPIC_API_KEY",
     "BFL_API_KEY",
@@ -61,12 +64,11 @@ def _load_env_file():
 
 _load_env_file()
 
-app = FastAPI(title="曾练AI短剧创作 (OmniDrama Studio)", version="1.4.0")
+app = FastAPI(title="曾练AI短剧创作 (OmniDrama Studio)", version="1.5.0")
 
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 ASSETS_DIR.mkdir(parents=True, exist_ok=True)
 
-# 挂载静态资源
 app.mount("/output", StaticFiles(directory=str(OUTPUT_DIR)), name="output")
 app.mount("/assets", StaticFiles(directory=str(ASSETS_DIR)), name="assets")
 
@@ -122,6 +124,9 @@ def _load_project_data() -> Dict[str, Any]:
                 d = json.load(f)
                 d["video_url"] = "/api/video/stream?mode=full"
                 d["live_actor_video"] = "/api/video/stream?mode=live"
+                for s in d.get("shots", []):
+                    if "visual_prompt" not in s or not s["visual_prompt"]:
+                        s["visual_prompt"] = f"masterpiece, 8k vertical anime drama, {s.get('speaker', 'character')}, {s.get('dialogue', '')}, cinematic lighting"
                 return d
         except Exception:
             pass
@@ -134,6 +139,7 @@ def _load_project_data() -> Dict[str, Any]:
             "motion": "ZOOM_IN",
             "motion_name": "镜头推进",
             "dialogue": "林家祖宅大堂，狂风骤雨拍打着雕花木窗。",
+            "visual_prompt": "masterpiece, 8k anime vertical drama, dark luxury mansion hall, heavy rain storm outside carved wooden window, cinematic lighting",
             "image": "/api/shots/1/image",
             "audio": "/api/shots/1/audio",
             "sfx": "暴雨环境音"
@@ -145,6 +151,7 @@ def _load_project_data() -> Dict[str, Any]:
             "motion": "PAN_LEFT",
             "motion_name": "向左横移",
             "dialogue": "叶辰，入赘三年，今日若拿不出三千万，就立刻滚出林家！",
+            "visual_prompt": "masterpiece, 8k anime vertical drama, haughty wealthy middle-aged woman in emerald qipao pointing finger angrily, cold arrogant expression",
             "image": "/api/shots/2/image",
             "audio": "/api/shots/2/audio",
             "sfx": "无"
@@ -156,6 +163,7 @@ def _load_project_data() -> Dict[str, Any]:
             "motion": "ZOOM_IN",
             "motion_name": "镜头推进",
             "dialogue": "叶辰神色淡然，深邃的双眸中隐现寒光。",
+            "visual_prompt": "masterpiece, 8k anime close-up portrait, handsome young man with sharp cold eyes, calm aura, dark hair, dramatic rim light",
             "image": "/api/shots/3/image",
             "audio": "/api/shots/3/audio",
             "sfx": "无"
@@ -167,6 +175,7 @@ def _load_project_data() -> Dict[str, Any]:
             "motion": "ZOOM_IN",
             "motion_name": "镜头推进",
             "dialogue": "三千万？当年若非我暗中相助，林家早在三年前就已灰飞烟灭！",
+            "visual_prompt": "masterpiece, 8k anime vertical drama, domineering young dragon king speaking coldly, golden aura sparks, dark suit",
             "image": "/api/shots/4/image",
             "audio": "/api/shots/4/audio",
             "sfx": "疾风起势 (Whoosh)"
@@ -178,6 +187,7 @@ def _load_project_data() -> Dict[str, Any]:
             "motion": "ZOOM_OUT",
             "motion_name": "镜头拉远",
             "dialogue": "哈哈哈！大言不惭的废物，也不撒泡尿照照自己是个什么东西！",
+            "visual_prompt": "masterpiece, 8k anime vertical drama, arrogant rich young master in white suit holding red wine glass laughing mockingly",
             "image": "/api/shots/5/image",
             "audio": "/api/shots/5/audio",
             "sfx": "无"
@@ -189,6 +199,7 @@ def _load_project_data() -> Dict[str, Any]:
             "motion": "SHAKE",
             "motion_name": "镜头震撼",
             "dialogue": "突然，天地间惊雷滚滚，整座大堂剧烈震颤！",
+            "visual_prompt": "masterpiece, 8k anime vertical drama, dramatic lightning bolts striking across dark stormy sky above grand mansion, shockwave",
             "image": "/api/shots/6/image",
             "audio": "/api/shots/6/audio",
             "sfx": "惊雷劈裂 (Thunder)"
@@ -200,6 +211,7 @@ def _load_project_data() -> Dict[str, Any]:
             "motion": "ZOOM_OUT",
             "motion_name": "镜头拉远",
             "dialogue": "大门轰然破碎，十八位身披黑金战铠的修罗战神破门而入！",
+            "visual_prompt": "masterpiece, 8k anime vertical drama, eighteen elite armored warriors in black and gold armor bursting through shattered mansion doors",
             "image": "/api/shots/7/image",
             "audio": "/api/shots/7/audio",
             "sfx": "重低音轰鸣 (Impact)"
@@ -211,6 +223,7 @@ def _load_project_data() -> Dict[str, Any]:
             "motion": "ZOOM_IN",
             "motion_name": "镜头推进",
             "dialogue": "恭迎龙王回归！十万修罗殿众将，随时听候调遣！",
+            "visual_prompt": "masterpiece, 8k anime vertical drama, armored general kneeling on one knee in respect, rain and golden light, epic atmosphere",
             "image": "/api/shots/8/image",
             "audio": "/api/shots/8/audio",
             "sfx": "金铁下跪 (Armor)"
@@ -222,6 +235,7 @@ def _load_project_data() -> Dict[str, Any]:
             "motion": "SHAKE",
             "motion_name": "镜头震撼",
             "dialogue": "龙……龙王？！你竟然是那位镇守北境的至尊龙王！",
+            "visual_prompt": "masterpiece, 8k anime vertical drama, shocked wealthy woman and young master pale with terror, dropping wine glass",
             "image": "/api/shots/9/image",
             "audio": "/api/shots/9/audio",
             "sfx": "无"
@@ -233,6 +247,7 @@ def _load_project_data() -> Dict[str, Any]:
             "motion": "ZOOM_IN",
             "motion_name": "镜头推进",
             "dialogue": "犯我逆鳞者，杀无赦！",
+            "visual_prompt": "masterpiece, 8k anime extreme close-up, glowing golden dragon eyes, supreme aura, dark lightning background",
             "image": "/api/shots/10/image",
             "audio": "/api/shots/10/audio",
             "sfx": "终极大爆炸 (Impact)"
@@ -294,9 +309,7 @@ async def get_current_project():
     return _load_project_data()
 
 
-@app.get("/api/video/stream")
-async def stream_current_video(mode: str = "full"):
-    """流式传输当前视频，支持 HTTP Range 与直接播放."""
+def _resolve_current_video_file(mode: str = "full") -> Path:
     data = _load_project_data()
     title = data.get("title", "至尊龙王归位")
     if mode == "live":
@@ -313,7 +326,27 @@ async def stream_current_video(mode: str = "full"):
             p = mp4s[0]
         else:
             raise HTTPException(status_code=404, detail="Video file not found")
+    return p
+
+
+@app.get("/api/video/stream")
+async def stream_current_video(mode: str = "full"):
+    """流式传输当前视频，支持 HTTP Range 与直接播放."""
+    p = _resolve_current_video_file(mode)
     return FileResponse(str(p), media_type="video/mp4")
+
+
+@app.get("/api/video/download")
+async def download_current_video(mode: str = "full"):
+    """供手机端或浏览器一键下载 MP4 成片到本地相册/目录."""
+    data = _load_project_data()
+    title = data.get("title", "至尊龙王归位")
+    p = _resolve_current_video_file(mode)
+    return FileResponse(
+        str(p),
+        media_type="video/mp4",
+        filename=f"{title}_成片.mp4"
+    )
 
 
 @app.get("/api/shots/{shot_id}/audio")
@@ -362,7 +395,7 @@ def _pick_source_manga_image(speaker: str, shot_id: int) -> Path:
     img_matriarch = brain_dir / "haughty_matriarch_1791544048959.jpg"
     img_young_master = brain_dir / "arrogant_young_master_1791544074800.jpg"
 
-    if any(w in speaker for w in ["母", "女", "柳", "妻", "姐", "妈"]):
+    if any(w in speaker for w in ["母", "女", "柳", "妻", "姐", "妈", "雪", "妃"]):
         if img_matriarch.exists():
             return img_matriarch
     if any(w in speaker for w in ["赵", "少", "反派", "恶", "富"]):
@@ -380,33 +413,28 @@ def _pick_source_manga_image(speaker: str, shot_id: int) -> Path:
     raise FileNotFoundError("No base reference artwork found")
 
 
-def _render_manga_frame_pil(source_img_path: Path, shot_id: int, speaker: str, dialogue: str, motion_name: str, out_path: str):
-    """使用 PIL 真实绘制 720x1280 竖屏漫剧分镜画面与台词字幕."""
+def _create_subtitle_overlay_png(
+    shot_id: int,
+    speaker: str,
+    dialogue: str,
+    motion_name: str,
+    out_png_path: str
+) -> str:
+    """生成 720x1280 RGBA 全透明字幕与顶部徽标叠加层 (用于 FFmpeg 运镜后固定叠加，绝不放大裁切)."""
     from PIL import Image, ImageDraw, ImageFont
     font_path = "C:/Windows/Fonts/msyh.ttc"
+    target_w, target_h = 720, 1280
 
-    os.makedirs(os.path.dirname(os.path.abspath(out_path)), exist_ok=True)
-    with Image.open(source_img_path) as im:
-        im = im.convert("RGB")
-        target_w, target_h = 720, 1280
-        scale = max(target_w / im.width, target_h / im.height)
-        new_w = int(im.width * scale)
-        new_h = int(im.height * scale)
-        im_resized = im.resize((new_w, new_h), Image.Resampling.LANCZOS)
-        left = (new_w - target_w) // 2
-        top = (new_h - target_h) // 2
-        frame = im_resized.crop((left, top, left + target_w, top + target_h))
-
-    # 先清除如果复用了旧图底部的字幕区，重绘深色电影级遮罩
+    os.makedirs(os.path.dirname(os.path.abspath(out_png_path)), exist_ok=True)
     overlay = Image.new("RGBA", (target_w, target_h), (0, 0, 0, 0))
-    overlay_draw = ImageDraw.Draw(overlay)
-    gradient_top = target_h - 240
-    for y in range(gradient_top, target_h):
-        alpha = int(245 * ((y - gradient_top) / (target_h - gradient_top)))
-        overlay_draw.line([(0, y), (target_w, y)], fill=(8, 10, 18, alpha))
-    frame.paste(overlay, (0, 0), overlay)
+    draw = ImageDraw.Draw(overlay)
 
-    draw = ImageDraw.Draw(frame)
+    # 底部字幕渐变黑透遮罩
+    gradient_top = target_h - 245
+    for y in range(gradient_top, target_h):
+        alpha = int(235 * ((y - gradient_top) / (target_h - gradient_top)))
+        draw.line([(0, y), (target_w, y)], fill=(8, 10, 18, alpha))
+
     try:
         badge_font = ImageFont.truetype(font_path, 20)
         speaker_font = ImageFont.truetype(font_path, 26)
@@ -416,28 +444,102 @@ def _render_manga_frame_pil(source_img_path: Path, shot_id: int, speaker: str, d
         speaker_font = ImageFont.load_default()
         dialogue_font = ImageFont.load_default()
 
-    # 顶部镜头徽标
+    # 顶部镜头徽标 (固定在左上角安全区)
     badge_text = f"第 {shot_id:02d} 镜 · {motion_name}"
-    draw.rounded_rectangle([20, 20, 210, 56], radius=8, fill=(10, 14, 26))
-    draw.text((32, 26), badge_text, font=badge_font, fill=(0, 220, 255))
+    draw.rounded_rectangle([20, 20, 220, 56], radius=8, fill=(10, 14, 26, 205))
+    draw.text((32, 26), badge_text, font=badge_font, fill=(0, 220, 255, 255))
 
-    # 底部角色与台词
-    speaker_color = (255, 215, 0) if speaker in ["叶辰", "主角"] else (
-        (255, 100, 100) if any(w in speaker for w in ["赵", "母", "反派"]) else (100, 220, 255)
+    # 底部角色名标签
+    speaker_color = (255, 215, 0, 255) if speaker in ["叶辰", "主角"] else (
+        (255, 105, 105, 255) if any(w in speaker for w in ["赵", "母", "反派"]) else (100, 220, 255, 255)
     )
-    draw.text((40, target_h - 185), f"【{speaker}】", font=speaker_font, fill=speaker_color)
+    draw.text((40, target_h - 190), f"【{speaker}】", font=speaker_font, fill=speaker_color)
 
+    # 底部描边中文字幕 (固定居中安全区)
     max_chars_per_line = 18
     dialogue_lines = [dialogue[i:i + max_chars_per_line] for i in range(0, len(dialogue), max_chars_per_line)][:3]
-    line_y = target_h - 140
+    line_y = target_h - 142
     for line in dialogue_lines:
         for ox, oy in [(-2, 0), (2, 0), (0, -2), (0, 2)]:
-            draw.text((40 + ox, line_y + oy), line, font=dialogue_font, fill=(0, 0, 0))
-        draw.text((40, line_y), line, font=dialogue_font, fill=(255, 255, 255))
+            draw.text((40 + ox, line_y + oy), line, font=dialogue_font, fill=(0, 0, 0, 255))
+        draw.text((40, line_y), line, font=dialogue_font, fill=(255, 255, 255, 255))
         line_y += 38
 
-    frame.save(out_path, quality=95)
-    return out_path
+    overlay.save(out_png_path, "PNG")
+    return out_png_path
+
+
+def _prepare_clean_background_and_preview(
+    source_img_path: Path,
+    shot_id: int,
+    speaker: str,
+    dialogue: str,
+    motion_name: str,
+    raw_bg_path: str,
+    sub_png_path: str,
+    preview_jpg_path: str,
+    is_fallback_portrait: bool = False
+):
+    """生成纯净无字 720x1280 背景图 (raw_bg_path)、透明字幕层 (sub_png_path) 以及卡片预览图 (preview_jpg_path)."""
+    from PIL import Image, ImageDraw, ImageEnhance
+    target_w, target_h = 720, 1280
+    os.makedirs(os.path.dirname(os.path.abspath(raw_bg_path)), exist_ok=True)
+
+    with Image.open(source_img_path) as im:
+        im = im.convert("RGB")
+        # 若使用的是本地基础立绘兜底，根据 shot_id 进行差异化景别裁剪与电影色调滤镜，避免每镜画面雷同
+        zoom_boost = 1.0 + ((shot_id % 4) * 0.08) if is_fallback_portrait else 1.0
+        scale = max(target_w / im.width, target_h / im.height) * zoom_boost
+        new_w = int(im.width * scale)
+        new_h = int(im.height * scale)
+        im_resized = im.resize((new_w, new_h), Image.Resampling.LANCZOS)
+
+        offset_x = ((shot_id * 37) % max(1, new_w - target_w)) if is_fallback_portrait and new_w > target_w else (new_w - target_w) // 2
+        offset_y = ((shot_id * 23) % max(1, (new_h - target_h) // 2)) if is_fallback_portrait and new_h > target_h else (new_h - target_h) // 2
+        frame = im_resized.crop((offset_x, offset_y, offset_x + target_w, offset_y + target_h))
+
+    if is_fallback_portrait:
+        # 注入符合该镜情绪的光效色调与动漫速度线
+        tint_palettes = [
+            (15, 30, 65, 45),   # 冷峻夜雨蓝
+            (55, 15, 25, 45),   # 压迫猩红
+            (50, 38, 10, 40),   # 帝王黑金
+            (15, 45, 45, 40),   # 寒芒青灰
+            (40, 15, 55, 45),   # 雷霆紫电
+        ]
+        tint_rgba = tint_palettes[(shot_id - 1) % len(tint_palettes)]
+        tint_layer = Image.new("RGBA", (target_w, target_h), tint_rgba)
+        frame_rgba = frame.convert("RGBA")
+        frame_rgba = Image.alpha_composite(frame_rgba, tint_layer)
+
+        # 若为震撼/推进镜头，绘制动感漫画速度线/雷电光束
+        fx_draw = ImageDraw.Draw(frame_rgba)
+        if "震撼" in motion_name or "推进" in motion_name:
+            cx, cy = target_w // 2, target_h // 2 - 80
+            for angle_deg in range(0, 360, 15):
+                rad = math.radians(angle_deg + (shot_id * 7))
+                r_inner = 290
+                r_outer = 750
+                x1 = cx + int(math.cos(rad) * r_inner)
+                y1 = cy + int(math.sin(rad) * r_inner)
+                x2 = cx + int(math.cos(rad) * r_outer)
+                y2 = cy + int(math.sin(rad) * r_outer)
+                fx_draw.line([(x1, y1), (x2, y2)], fill=(255, 240, 190, 38), width=2)
+
+        frame = frame_rgba.convert("RGB")
+        frame = ImageEnhance.Contrast(frame).enhance(1.08)
+
+    # 1. 保存纯净无字的背景图供 FFmpeg 2.5D 运镜使用
+    frame.save(raw_bg_path, quality=95)
+
+    # 2. 生成全透明 RGBA 字幕层供 FFmpeg 顶层固定叠加
+    _create_subtitle_overlay_png(shot_id, speaker, dialogue, motion_name, sub_png_path)
+
+    # 3. 合成带字幕的预览卡片图供前端分镜列表展示
+    with Image.open(sub_png_path) as sub_im:
+        preview = frame.convert("RGBA")
+        preview.alpha_composite(sub_im)
+        preview.convert("RGB").save(preview_jpg_path, quality=92)
 
 
 def _resolve_character_voice_code(speaker: str, characters: List[Dict[str, Any]]) -> str:
@@ -471,8 +573,117 @@ def _resolve_character_voice_code(speaker: str, characters: List[Dict[str, Any]]
     return "zh-CN-YunxiNeural"
 
 
+async def _generate_single_shot_visual(
+    shot: Dict[str, Any],
+    shots_dir: Path,
+    logs_list: Optional[List[str]] = None
+) -> Optional[str]:
+    """为单个分镜生成真实画面 (支持 SiliconFlow 免费 FLUX / BFL FLUX / Pexels 视频或图片 / 本地差异化合成).
+    返回动态视频片段路径 (若使用了 Pexels 视频) 或 None (使用图片运镜).
+    """
+    import asyncio
+    from omnidrama.providers.siliconflow_provider import SiliconFlowProvider
+    from omnidrama.providers.flux_provider import FluxProProvider
+    from omnidrama.providers.pexels_provider import PexelsProvider
+
+    sid = int(shot["id"])
+    speaker = shot.get("speaker", "旁白")
+    dialogue = shot.get("dialogue", "")
+    motion_name = shot.get("motion_name", "镜头推进")
+    visual_prompt = shot.get(
+        "visual_prompt",
+        f"masterpiece, 8k vertical anime drama frame, {speaker}, {dialogue}, dramatic lighting"
+    )
+
+    raw_bg_path = str(shots_dir / f"shot_{sid:03d}_raw.jpg")
+    sub_png_path = str(shots_dir / f"shot_{sid:03d}_sub.png")
+    preview_jpg_path = str(shots_dir / f"shot_{sid:03d}.jpg")
+    ai_gen_source_path = str(shots_dir / f"ai_src_{sid:03d}.jpg")
+
+    sf_key = os.environ.get("SILICONFLOW_API_KEY", "").strip()
+    bfl_key = (os.environ.get("BFL_API_KEY", "") or os.environ.get("FLUX_API_KEY", "")).strip()
+    pexels_key = os.environ.get("PEXELS_API_KEY", "").strip()
+
+    generated_ai_img = False
+
+    # 1. 优先使用硅基流动 SiliconFlow (国内免绑卡·免费 FLUX.1-schnell)
+    if sf_key:
+        try:
+            sf_provider = SiliconFlowProvider(api_key=sf_key)
+            await asyncio.to_thread(
+                sf_provider.generate_shot_image,
+                visual_prompt,
+                ai_gen_source_path
+            )
+            generated_ai_img = True
+            if logs_list is not None:
+                logs_list.append(f"🎨 [{_now_str()}] 第 {sid:02d} 镜：SiliconFlow FLUX 真实生图成功！")
+        except Exception as sf_err:
+            if logs_list is not None:
+                logs_list.append(f"⚠️ [{_now_str()}] 第 {sid:02d} 镜 SiliconFlow 生图异常 ({str(sf_err)[:55]})")
+
+    # 2. 尝试官方 Black Forest Labs FLUX.1 Pro
+    if not generated_ai_img and bfl_key:
+        try:
+            flux_provider = FluxProProvider(api_key=bfl_key)
+            await asyncio.to_thread(
+                flux_provider.generate_cinematic_frame,
+                visual_prompt,
+                "9:16",
+                ai_gen_source_path
+            )
+            generated_ai_img = True
+            if logs_list is not None:
+                logs_list.append(f"🎨 [{_now_str()}] 第 {sid:02d} 镜：FLUX.1 Pro 真实生图成功！")
+        except Exception as bfl_err:
+            if logs_list is not None:
+                logs_list.append(f"⚠️ [{_now_str()}] 第 {sid:02d} 镜 FLUX.1 Pro 异常 ({str(bfl_err)[:55]})")
+
+    # 3. 尝试 Pexels 免费高清图库/视频库 (对标 MoneyPrinterTurbo)
+    pexels_video_clip: Optional[str] = None
+    if not generated_ai_img and pexels_key:
+        try:
+            px = PexelsProvider(api_key=pexels_key)
+            photo_res = await asyncio.to_thread(
+                px.search_and_download_photo,
+                visual_prompt,
+                ai_gen_source_path
+            )
+            if photo_res:
+                generated_ai_img = True
+                if logs_list is not None:
+                    logs_list.append(f"📸 [{_now_str()}] 第 {sid:02d} 镜：Pexels 高清剧照匹配下载成功！")
+            vid_target = str(shots_dir / f"pexels_vid_{sid:03d}.mp4")
+            vid_res = await asyncio.to_thread(
+                px.search_and_download_video,
+                visual_prompt,
+                vid_target
+            )
+            if vid_res:
+                pexels_video_clip = vid_res
+        except Exception:
+            pass
+
+    src_img_for_bg = Path(ai_gen_source_path) if generated_ai_img and os.path.exists(ai_gen_source_path) else _pick_source_manga_image(speaker, sid)
+
+    await asyncio.to_thread(
+        _prepare_clean_background_and_preview,
+        src_img_for_bg,
+        sid,
+        speaker,
+        dialogue,
+        motion_name,
+        raw_bg_path,
+        sub_png_path,
+        preview_jpg_path,
+        not generated_ai_img
+    )
+    shot["image"] = f"/api/shots/{sid}/image"
+    return pexels_video_clip
+
+
 async def _run_production_pipeline(req: Optional[RenderRequest]):
-    """100% 真实执行的短剧制作与渲染流水线 (绝无虚假 sleep)."""
+    """100% 真实执行的短剧制作与渲染流水线 (运镜与字幕双层分离架构)."""
     import asyncio
     global RENDER_STATE
     _load_env_file()
@@ -483,7 +694,6 @@ async def _run_production_pipeline(req: Optional[RenderRequest]):
         from omnidrama.core.audio_mixer import AudioMixer
         from omnidrama.core.compositor import VideoCompositor
         from omnidrama.schemas.drama_schema import CameraMotionEnum, Shot, ShotScaleEnum
-        from omnidrama.providers.flux_provider import FluxProProvider
         from omnidrama.providers.elevenlabs_provider import ElevenLabsProvider
     except ImportError:
         from core.director import DirectorAgent
@@ -491,7 +701,6 @@ async def _run_production_pipeline(req: Optional[RenderRequest]):
         from core.audio_mixer import AudioMixer
         from core.compositor import VideoCompositor
         from schemas.drama_schema import CameraMotionEnum, Shot, ShotScaleEnum
-        from providers.flux_provider import FluxProProvider
         from providers.elevenlabs_provider import ElevenLabsProvider
 
     try:
@@ -501,7 +710,7 @@ async def _run_production_pipeline(req: Optional[RenderRequest]):
         RENDER_STATE["step_index"] = 1
         RENDER_STATE["current_step"] = "阶段 1/5：AI 总导演剧本与分镜拆解"
         RENDER_STATE["logs"] = [
-            f"🚀 [{_now_str()}] 曾练AI短剧创作 · 真实制片流水线正式启动！"
+            f"🚀 [{_now_str()}] 曾练AI短剧创作 v1.5.0 · 真实制片流水线启动！"
         ]
 
         data = _load_project_data()
@@ -509,7 +718,6 @@ async def _run_production_pipeline(req: Optional[RenderRequest]):
         genre = (req.genre if req and req.genre else data.get("genre", "都市战神爽文")).strip()
         novel_text = (req.novel_text if req and req.novel_text else "").strip()
 
-        # 阶段 1：如果传入了新小说文本，调用真实的 DirectorAgent (DeepSeek / Claude / Gemini)
         if novel_text:
             RENDER_STATE["logs"].append(f"🎬 [{_now_str()}] 正在调用 AI 导演引擎拆解小说《{title}》...")
             agent = DirectorAgent()
@@ -560,63 +768,34 @@ async def _run_production_pipeline(req: Optional[RenderRequest]):
         shots_dir = proj_dir / "shots"
         shots_dir.mkdir(parents=True, exist_ok=True)
 
-        # 阶段 2：真实分镜剧照生成 (若配置了 BFL_API_KEY 则调用 FLUX.1 Pro API，否则执行 PIL 高清竖屏漫剧帧渲染)
+        # 阶段 2：真实分镜画面与独立透明字幕层生成
         RENDER_STATE["progress"] = 30
         RENDER_STATE["step_index"] = 2
-        bfl_key = os.environ.get("BFL_API_KEY", "") or os.environ.get("FLUX_API_KEY", "")
-        if bfl_key:
-            RENDER_STATE["current_step"] = "阶段 2/5：FLUX.1 Pro 云端 API 正在生成分镜剧照"
-            RENDER_STATE["logs"].append(f"🎨 [{_now_str()}] 检测到 BFL_API_KEY ({_mask_key(bfl_key)})，正在调用 FLUX.1 Pro 生成分镜图...")
-        else:
-            RENDER_STATE["current_step"] = "阶段 2/5：本地 PIL 漫剧渲染引擎合成 720x1280 竖屏分镜与字幕"
-            RENDER_STATE["logs"].append(f"🎨 [{_now_str()}] 未配置 FLUX Key，启用本地高清漫剧分镜渲染器逐帧绘制《{title}》分镜图...")
+        sf_key = os.environ.get("SILICONFLOW_API_KEY", "").strip()
+        bfl_key = (os.environ.get("BFL_API_KEY", "") or os.environ.get("FLUX_API_KEY", "")).strip()
+        pexels_key = os.environ.get("PEXELS_API_KEY", "").strip()
 
-        flux_provider = FluxProProvider(api_key=bfl_key) if bfl_key else None
+        if sf_key:
+            RENDER_STATE["current_step"] = "阶段 2/5：硅基流动 FLUX.1 正在逐镜生成专属分镜画面"
+            RENDER_STATE["logs"].append(f"🎨 [{_now_str()}] 已启用 SILICONFLOW_API_KEY ({_mask_key(sf_key)}) 逐镜生成原画...")
+        elif bfl_key:
+            RENDER_STATE["current_step"] = "阶段 2/5：FLUX.1 Pro 正在逐镜生成专属分镜画面"
+            RENDER_STATE["logs"].append(f"🎨 [{_now_str()}] 已启用 BFL_API_KEY ({_mask_key(bfl_key)}) 逐镜生成原画...")
+        elif pexels_key:
+            RENDER_STATE["current_step"] = "阶段 2/5：Pexels 高清视频/图片库正在逐镜匹配素材"
+            RENDER_STATE["logs"].append(f"📸 [{_now_str()}] 已启用 PEXELS_API_KEY ({_mask_key(pexels_key)}) 检索匹配高清素材...")
+        else:
+            RENDER_STATE["current_step"] = "阶段 2/5：本地漫剧特效引擎逐镜绘制背景层与独立透明字幕层"
+            RENDER_STATE["logs"].append(f"🎨 [{_now_str()}] 正在分离绘制《{title}》无字背景原画层与 RGBA 固定字幕层...")
+
+        shot_video_clips: Dict[int, str] = {}
         for s in shots_list:
             sid = int(s["id"])
-            img_out = shots_dir / f"shot_{sid:03d}.jpg"
-            speaker = s.get("speaker", "旁白")
-            dialogue = s.get("dialogue", "")
-            motion_name = s.get("motion_name", "镜头推进")
-            visual_prompt = s.get("visual_prompt", f"Cinematic vertical anime frame, {speaker}, {dialogue}, 8k")
+            vid_clip = await _generate_single_shot_visual(s, shots_dir, RENDER_STATE["logs"])
+            if vid_clip:
+                shot_video_clips[sid] = vid_clip
 
-            used_flux = False
-            if flux_provider:
-                try:
-                    raw_flux_path = str(shots_dir / f"flux_raw_{sid:03d}.jpg")
-                    await asyncio.to_thread(
-                        flux_provider.generate_cinematic_frame,
-                        visual_prompt,
-                        "9:16",
-                        raw_flux_path
-                    )
-                    await asyncio.to_thread(
-                        _render_manga_frame_pil,
-                        Path(raw_flux_path),
-                        sid,
-                        speaker,
-                        dialogue,
-                        motion_name,
-                        str(img_out)
-                    )
-                    used_flux = True
-                except Exception as flux_err:
-                    RENDER_STATE["logs"].append(f"⚠️ [{_now_str()}] 第 {sid:02d} 镜 FLUX API 异常 ({str(flux_err)[:60]})，自动切换本地漫剧立绘合成。")
-
-            if not used_flux:
-                src_img = _pick_source_manga_image(speaker, sid)
-                await asyncio.to_thread(
-                    _render_manga_frame_pil,
-                    src_img,
-                    sid,
-                    speaker,
-                    dialogue,
-                    motion_name,
-                    str(img_out)
-                )
-            s["image"] = f"/api/shots/{sid}/image"
-
-        RENDER_STATE["logs"].append(f"✅ [{_now_str()}] 全部 {len(shots_list)} 张分镜剧照与台词字幕已真实写入：{shots_dir}")
+        RENDER_STATE["logs"].append(f"✅ [{_now_str()}] 全部 {len(shots_list)} 镜的无字背景原画与独立透明字幕层已准备完毕！")
 
         # 阶段 3：真实角色配音合成 (ElevenLabs API 或 微软 Edge-TTS 神经网络语音合成)
         RENDER_STATE["progress"] = 55
@@ -646,7 +825,6 @@ async def _run_production_pipeline(req: Optional[RenderRequest]):
             synthesized = False
             if eleven_provider:
                 try:
-                    # 默认使用 ElevenLabs 官方 Adam/Rachel 预设 Voice ID
                     el_voice_id = "pNInz6obpgDQGcFmaJgB" if "Xiaoxiao" not in voice_code else "21m00Tcm4TlvDq8ikWAM"
                     await asyncio.to_thread(
                         eleven_provider.synthesize_emotional_speech,
@@ -732,18 +910,23 @@ async def _run_production_pipeline(req: Optional[RenderRequest]):
         await asyncio.to_thread(_concat_and_mix)
         RENDER_STATE["logs"].append(f"✅ [{_now_str()}] 母带混音完成：{master_wav} (总时长 {total_dur:.2f} 秒)")
 
-        # 阶段 5：FFmpeg 2.5D 电影级动态运镜压制与合成
+        # 阶段 5：FFmpeg 双层合成 (背景 2.5D 动态运镜 + 顶层固定透明字幕层 overlay)
         RENDER_STATE["progress"] = 90
         RENDER_STATE["step_index"] = 5
-        RENDER_STATE["current_step"] = "阶段 5/5：FFmpeg 2.5D 电影级动态运镜压制 MP4 成片"
-        RENDER_STATE["logs"].append(f"🎞️ [{_now_str()}] 启动 FFmpeg 视频合成器 (720x1280 @ 24fps)，逐镜渲染动态运镜...")
+        RENDER_STATE["current_step"] = "阶段 5/5：FFmpeg 双层压制 (背景动态运镜 + 固定字幕层合成)"
+        RENDER_STATE["logs"].append(f"🎞️ [{_now_str()}] 启动 FFmpeg 双层视频合成器，确保运镜时字幕稳固居中不裁切...")
 
         compositor = VideoCompositor(width=720, height=1280, fps=24)
         clip_paths: List[str] = []
 
         for idx, s in enumerate(shots_list):
             sid = int(s["id"])
-            img_p = str(shots_dir / f"shot_{sid:03d}.jpg")
+            raw_bg_p = str(shots_dir / f"shot_{sid:03d}_raw.jpg")
+            sub_png_p = str(shots_dir / f"shot_{sid:03d}_sub.png")
+            fallback_img_p = str(shots_dir / f"shot_{sid:03d}.jpg")
+            bg_to_use = raw_bg_p if os.path.exists(raw_bg_p) else fallback_img_p
+            sub_to_use = sub_png_p if os.path.exists(raw_bg_p) and os.path.exists(sub_png_p) else None
+
             aud_p = str(shots_dir / f"shot_{sid:03d}.mp3")
             clip_p = str(shots_dir / f"shot_{sid:03d}.mp4")
             m_str = s.get("motion", "ZOOM_IN").upper()
@@ -759,13 +942,23 @@ async def _run_production_pipeline(req: Optional[RenderRequest]):
             else:
                 cm = CameraMotionEnum.ZOOM_IN
 
-            await asyncio.to_thread(
-                compositor.render_shot,
-                img_p,
-                aud_p,
-                cm,
-                clip_p
-            )
+            if sid in shot_video_clips and os.path.exists(shot_video_clips[sid]):
+                await asyncio.to_thread(
+                    compositor.render_video_shot,
+                    shot_video_clips[sid],
+                    aud_p,
+                    clip_p,
+                    sub_to_use
+                )
+            else:
+                await asyncio.to_thread(
+                    compositor.render_shot,
+                    bg_to_use,
+                    aud_p,
+                    cm,
+                    clip_p,
+                    sub_to_use
+                )
             clip_paths.append(clip_p)
             RENDER_STATE["progress"] = min(98, 90 + int(((idx + 1) / max(1, len(shots_list))) * 8))
 
@@ -830,6 +1023,104 @@ async def trigger_render_pipeline(req: Optional[RenderRequest] = None, backgroun
         asyncio.create_task(_run_production_pipeline(req))
 
     return {"status": "started", "message": "真实短剧制作与 FFmpeg 渲染流水线已启动！"}
+
+
+class UpdateShotRequest(BaseModel):
+    speaker: str
+    dialogue: str
+    visual_prompt: Optional[str] = ""
+    motion: Optional[str] = "ZOOM_IN"
+    regenerate_image: bool = True
+    regenerate_audio: bool = True
+    regenerate_tts: Optional[bool] = None
+
+
+@app.put("/api/shots/{shot_id}")
+async def update_and_regenerate_shot(shot_id: int, req: UpdateShotRequest):
+    """单分镜精修工作台：修改指定分镜的台词、画面提示词、运镜，并立即真实重绘画面、重录配音及更新单镜头 MP4."""
+    _load_env_file()
+    try:
+        from omnidrama.core.tts_engine import TTSEngine
+        from omnidrama.core.compositor import VideoCompositor
+        from omnidrama.schemas.drama_schema import CameraMotionEnum
+    except ImportError:
+        from core.tts_engine import TTSEngine
+        from core.compositor import VideoCompositor
+        from schemas.drama_schema import CameraMotionEnum
+
+    data = _load_project_data()
+    title = data.get("title", "至尊龙王归位")
+    shots_dir = OUTPUT_DIR / title / "shots"
+    shots_dir.mkdir(parents=True, exist_ok=True)
+
+    target_shot = None
+    for s in data.get("shots", []):
+        if int(s["id"]) == shot_id:
+            target_shot = s
+            break
+
+    if not target_shot:
+        raise HTTPException(status_code=404, detail=f"Shot {shot_id} not found")
+
+    m_val = (req.motion or "ZOOM_IN").upper()
+    m_name = "镜头震撼" if "SHAKE" in m_val else (
+        "镜头拉远" if "OUT" in m_val else ("向左横移" if "PAN" in m_val else "镜头推进")
+    )
+
+    target_shot["speaker"] = req.speaker.strip() or "旁白"
+    target_shot["dialogue"] = req.dialogue.strip()
+    target_shot["motion"] = m_val
+    target_shot["motion_name"] = m_name
+    if req.visual_prompt and req.visual_prompt.strip():
+        target_shot["visual_prompt"] = req.visual_prompt.strip()
+
+    if req.regenerate_image:
+        await _generate_single_shot_visual(target_shot, shots_dir)
+    else:
+        # 即使不重绘底图，如果改了台词也更新双层透明字幕层和预览缩略图
+        raw_img = shots_dir / f"shot_{shot_id:03d}_raw.jpg"
+        preview_img = shots_dir / f"shot_{shot_id:03d}.jpg"
+        sub_png = shots_dir / f"shot_{shot_id:03d}_sub.png"
+        if raw_img.exists():
+            _prepare_clean_background_and_preview(raw_img, preview_img, sub_png, target_shot)
+
+    do_tts = req.regenerate_tts if req.regenerate_tts is not None else req.regenerate_audio
+    tts_engine = TTSEngine()
+    audio_out = str(shots_dir / f"shot_{shot_id:03d}.mp3")
+    if do_tts:
+        voice_code = _resolve_character_voice_code(target_shot["speaker"], data.get("characters", []))
+        await tts_engine.generate_speech(
+            text=target_shot["dialogue"],
+            voice=voice_code,
+            output_path=audio_out
+        )
+        target_shot["audio"] = f"/api/shots/{shot_id}/audio"
+
+    # 立即使用双层防变形技术重压该单镜头 MP4 片段
+    raw_img = shots_dir / f"shot_{shot_id:03d}_raw.jpg"
+    preview_img = shots_dir / f"shot_{shot_id:03d}.jpg"
+    sub_png = shots_dir / f"shot_{shot_id:03d}_sub.png"
+    bg_to_use = raw_img if raw_img.exists() else preview_img
+    if bg_to_use.exists() and Path(audio_out).exists():
+        compositor = VideoCompositor(width=720, height=1280, fps=24)
+        motion_enum = CameraMotionEnum.ZOOM_IN
+        if "OUT" in m_val:
+            motion_enum = CameraMotionEnum.ZOOM_OUT
+        elif "PAN" in m_val:
+            motion_enum = CameraMotionEnum.PAN_LEFT
+        elif "SHAKE" in m_val:
+            motion_enum = CameraMotionEnum.SHAKE
+        compositor.render_shot(
+            image_path=str(bg_to_use),
+            audio_path=audio_out,
+            camera_motion=motion_enum,
+            output_path=str(shots_dir / f"shot_{shot_id:03d}.mp4"),
+            subtitle_overlay_path=str(sub_png) if sub_png.exists() else None
+        )
+
+    _save_project_data(data)
+    return {**data, "status": "success", "shot": target_shot}
+
 
 
 class CharacterModel(BaseModel):
@@ -996,53 +1287,53 @@ async def get_sota_status():
         }
 
     providers_status = {
+        "siliconflow": _entry(
+            "🔥 硅基流动 SiliconFlow (国内免绑卡首选)",
+            "一个Key同时开启：免费 FLUX.1 逐镜真实生图 + DeepSeek/Qwen 导演剧本拆解",
+            "SILICONFLOW_API_KEY",
+            "国内免费生图+导演"
+        ),
         "deepseek": _entry(
-            "DeepSeek-V3 / R1 (深度求索)",
+            "DeepSeek-V3 / R1 (深度求索官方)",
             "好莱坞编剧与十镜分镜剧本拆解总导演",
             "DEEPSEEK_API_KEY",
-            "主力导演 (推荐配置)"
+            "主力导演 (国内直连)"
+        ),
+        "pexels": _entry(
+            "Pexels 免费高清视频/图片素材库",
+            "对标 MoneyPrinterTurbo：0元免绑卡自动匹配下载 9:16 竖屏高清实拍素材",
+            "PEXELS_API_KEY",
+            "免费动态视频素材"
+        ),
+        "kimi": _entry(
+            "Kimi (月之暗面 Moonshot AI)",
+            "长篇网文理解、剧本台词打磨与镜头关键词提炼",
+            "MOONSHOT_API_KEY",
+            "国内直连 (SOTA)"
         ),
         "gemini": _entry(
             "Google Gemini 2.0 Flash",
             "多模态剧本拆解与分镜视觉提示词引擎",
             "GEMINI_API_KEY",
-            "高速导演 (支持免费Key)"
-        ),
-        "claude": _entry(
-            "Claude 3.5 Sonnet (Anthropic)",
-            "殿堂级文学剧本改编与戏剧冲突调度",
-            "ANTHROPIC_API_KEY",
-            "行业顶级 (SOTA)"
+            "高速导演"
         ),
         "image": _entry(
             "FLUX.1 Pro (Black Forest Labs)",
-            "8K 胶片级定妆与分镜剧照生图 (未配则用本地PIL漫剧合成)",
+            "8K 胶片级定妆与分镜剧照生图 (海外官方)",
             "BFL_API_KEY",
             "行业顶级 (SOTA)"
         ),
         "voice": _entry(
             "ElevenLabs Multilingual v2",
-            "人类级呼吸感情绪配音 (未配则用内置免费 Edge-TTS)",
+            "人类级呼吸感情绪配音 (未配则用内置免费微软 Edge-TTS)",
             "ELEVENLABS_API_KEY",
-            "行业顶级 (SOTA)"
-        ),
-        "video_hailuo": _entry(
-            "MiniMax 海螺 Video-01",
-            "真人微表情与眼神光电影级图生视频",
-            "MINIMAX_API_KEY",
-            "行业顶级 (SOTA)"
-        ),
-        "video_kling": _entry(
-            "快手可灵 Kling 2.0 Pro",
-            "大动作打斗、物理交互与镜头轨迹控制",
-            "KLING_ACCESS_KEY",
             "行业顶级 (SOTA)"
         ),
     }
 
     return {
         "system": {
-            "os": "Windows (内置 Edge-TTS 免费配音 + FFmpeg 运镜已激活)",
+            "os": "Windows (内置 Edge-TTS 免费配音 + FFmpeg 双层字幕运镜已激活)",
             "ffmpeg": bool(shutil.which("ffmpeg")),
             "jianying_installed": bool(jianying_path),
             "jianying_draft_path": jianying_path or "未检测到默认安装路径 (将导出到工程目录)"

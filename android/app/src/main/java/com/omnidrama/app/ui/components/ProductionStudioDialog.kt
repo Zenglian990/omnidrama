@@ -245,11 +245,11 @@ fun ProductionStudioDialog(
                 Spacer(modifier = Modifier.height(6.dp))
 
                 val steps = listOf(
-                    Triple("导演分镜引擎", "LLM / 规则剧本分镜拆解", renderStatus.progress >= 20),
-                    Triple("分镜画面合成", "FLUX API / PIL 竖屏漫剧帧绘制", renderStatus.progress >= 45),
+                    Triple("导演分镜引擎", "DeepSeek / 硅基流动 / Gemini 拆解分镜", renderStatus.progress >= 20),
+                    Triple("分镜画面合成", "硅基流动 FLUX.1 / Pexels 实景 / PIL 帧绘制", renderStatus.progress >= 45),
                     Triple("多角色配音", "ElevenLabs / 微软 Edge-TTS 语音合成", renderStatus.progress >= 70),
                     Triple("母带混音棚", "FFmpeg 人声+雷雨音效+交响BGM混音", renderStatus.progress >= 85),
-                    Triple("视频合成压制", "FFmpeg 2.5D 动态运镜与 MP4 成片压制", renderStatus.progress >= 100)
+                    Triple("双层防变形压制", "FFmpeg 运镜与静止字幕分层压制 MP4", renderStatus.progress >= 100)
                 )
 
                 Column(

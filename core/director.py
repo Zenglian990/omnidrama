@@ -1,11 +1,11 @@
 """OmniDrama 导演智能体 (Director Agent).
 
-负责调用真实大模型 API (DeepSeek / Gemini / Claude) 将小说文本转化为结构化剧本与分镜资产。
+负责调用真实大模型 API (SiliconFlow / DeepSeek / Kimi / Gemini / Claude) 将小说文本转化为结构化剧本与分镜资产。
 """
 import os
 import re
 import json
-from typing import Optional, List, Dict, Tuple
+from typing import Optional, List, Dict
 import requests
 
 from omnidrama.schemas.drama_schema import (
@@ -34,7 +34,7 @@ DIRECTOR_SYSTEM_PROMPT = """你是一名资深短剧/漫剧总导演。你的任
       "camera_motion": "zoom_in 或 zoom_out 或 pan_left 或 pan_right 或 shake 或 static",
       "speaker": "说话角色名 或 旁白",
       "dialogue": "该镜头的台词或旁白内容（中文）",
-      "visual_prompt": "英文画面描述词，用于AI生图，例如: masterpiece, 8k anime vertical drama, dark mansion hall, heavy rain outside window, cinematic lighting"
+      "visual_prompt": "英文画面描述词，用于AI生图或Pexels搜索，例如: masterpiece, 8k anime vertical drama, dark mansion hall, heavy rain outside window, cinematic lighting"
     }
   ]
 }
@@ -65,7 +65,11 @@ class DirectorAgent:
         if text.startswith("```"):
             text = re.sub(r"^```(?:json)?\s*", "", text)
             text = re.sub(r"\s*```$", "", text)
-        return json.loads(text.strip())
+        start = text.find("{")
+        end = text.rfind("}")
+        if start != -1 and end != -1 and end > start:
+            text = text[start:end + 1]
+        return json.loads(text)
 
     def breakdown_story_offline(self, raw_text: str, title: str = "短剧第一集", genre: str = "都市爽文") -> DramaProject:
         """本地语法规则拆解引擎（当未配置外部 LLM Key 时兜底使用）."""
@@ -89,7 +93,7 @@ class DirectorAgent:
                 dialogue = match.group(2).strip().strip("“”\"'")
 
             if speaker != "旁白" and speaker not in characters_dict:
-                is_female = any(w in speaker for w in ["女", "妹", "妻", "小姐", "姐", "母", "琴", "雪", "涵"])
+                is_female = any(w in speaker for w in ["女", "妹", "妻", "小姐", "姐", "母", "琴", "雪", "涵", "妃"])
                 characters_dict[speaker] = CharacterAsset(
                     name=speaker,
                     gender="female" if is_female else "male",
@@ -156,14 +160,29 @@ class DirectorAgent:
         api_key: Optional[str] = None,
         model: str = "deepseek-chat"
     ) -> DramaProject:
-        """真实调用用户配置的 LLM 大模型 (DeepSeek / Claude / Gemini) 进行分镜拆解."""
+        """真实调用用户配置的 LLM 大模型 (SiliconFlow / DeepSeek / Kimi / Claude / Gemini) 进行分镜拆解."""
+        siliconflow_key = os.environ.get("SILICONFLOW_API_KEY", "").strip()
         deepseek_key = api_key or os.environ.get("DEEPSEEK_API_KEY", "").strip()
+        moonshot_key = os.environ.get("MOONSHOT_API_KEY", "").strip()
         anthropic_key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
         gemini_key = os.environ.get("GEMINI_API_KEY", os.environ.get("GOOGLE_API_KEY", "")).strip()
 
         user_prompt = f"短剧标题: {title}\n题材: {genre}\n小说原文:\n{raw_text}"
 
-        # 1. 优先尝试 DeepSeek API (真实调用)
+        # 1. 优先尝试硅基流动 SiliconFlow (国内免绑卡，含免费 Qwen2.5 与 DeepSeek-V3)
+        if siliconflow_key:
+            try:
+                from omnidrama.providers.siliconflow_provider import SiliconFlowProvider
+                sf = SiliconFlowProvider(api_key=siliconflow_key)
+                content_str, engine_name = sf.chat_completion(DIRECTOR_SYSTEM_PROMPT, user_prompt)
+                parsed = self._extract_json(content_str)
+                proj = DramaProject.model_validate(parsed)
+                self.last_used_engine = engine_name
+                return proj
+            except Exception as e:
+                print(f"[DirectorAgent] SiliconFlow 调用异常: {e}")
+
+        # 2. 尝试 DeepSeek 官方 API (真实调用)
         if deepseek_key:
             try:
                 base = (api_base or "https://api.deepseek.com").rstrip("/")
@@ -189,7 +208,31 @@ class DirectorAgent:
             except Exception as e:
                 print(f"[DirectorAgent] DeepSeek 调用异常: {e}")
 
-        # 2. 尝试 Anthropic Claude API (真实调用)
+        # 3. 尝试 Kimi (Moonshot AI)
+        if moonshot_key:
+            try:
+                url = "https://api.moonshot.cn/v1/chat/completions"
+                headers = {"Authorization": f"Bearer {moonshot_key}", "Content-Type": "application/json"}
+                payload = {
+                    "model": "moonshot-v1-8k",
+                    "messages": [
+                        {"role": "system", "content": DIRECTOR_SYSTEM_PROMPT},
+                        {"role": "user", "content": user_prompt}
+                    ],
+                    "temperature": 0.7
+                }
+                resp = requests.post(url, headers=headers, json=payload, timeout=45)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    content_str = data["choices"][0]["message"]["content"]
+                    parsed = self._extract_json(content_str)
+                    proj = DramaProject.model_validate(parsed)
+                    self.last_used_engine = "Kimi (Moonshot-v1)"
+                    return proj
+            except Exception as e:
+                print(f"[DirectorAgent] Kimi 调用异常: {e}")
+
+        # 4. 尝试 Anthropic Claude API
         if anthropic_key:
             try:
                 url = "https://api.anthropic.com/v1/messages"
@@ -215,7 +258,7 @@ class DirectorAgent:
             except Exception as e:
                 print(f"[DirectorAgent] Claude 调用异常: {e}")
 
-        # 3. 尝试 Google Gemini API (真实调用)
+        # 5. 尝试 Google Gemini API
         if gemini_key:
             try:
                 url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={gemini_key}"
@@ -235,5 +278,5 @@ class DirectorAgent:
             except Exception as e:
                 print(f"[DirectorAgent] Gemini 调用异常: {e}")
 
-        # 4. 兜底本地规则拆解
+        # 6. 兜底本地规则拆解
         return self.breakdown_story_offline(raw_text, title=title, genre=genre)
