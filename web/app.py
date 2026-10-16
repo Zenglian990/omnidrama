@@ -79,6 +79,12 @@ class StoryRequest(BaseModel):
     story_text: str
 
 
+@app.get("/health")
+@app.get("/api/health")
+async def health_check():
+    return {"status": "ok", "service": "omnidrama"}
+
+
 @app.get("/", response_class=HTMLResponse)
 async def serve_studio():
     index_file = WEB_DIR / "index.html"

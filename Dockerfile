@@ -19,10 +19,11 @@ RUN pip install --no-cache-dir -r requirements.txt
 # 复制代码
 COPY . .
 
-# 暴露端口
-EXPOSE 8765
+# 暴露端口 (Google Cloud Run 标准 8080)
+EXPOSE 8080
 
 ENV PYTHONPATH=/app:/app/omnidrama
 ENV PYTHONUNBUFFERED=1
+ENV PORT=8080
 
-CMD ["sh", "-c", "python -m uvicorn web.app:app --host 0.0.0.0 --port ${PORT:-8765}"]
+CMD ["sh", "-c", "python -m uvicorn web.app:app --host 0.0.0.0 --port ${PORT:-8080}"]
