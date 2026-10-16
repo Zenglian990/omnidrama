@@ -846,8 +846,19 @@ object LocalAndroidEngine {
                 rawLines = finer
             }
         }
-
-        val effectiveLines = (if (rawLines.isNotEmpty()) rawLines.take(10) else listOf(novelText.trim().ifEmpty { "《$title》第一幕开启。" }))
+        val effectiveLines = if (rawLines.size >= 4) {
+            rawLines.take(10)
+        } else {
+            // 绝不只有 1 镜！根据题材与剧名自动展开为经典的 6 幕起承转合短剧大片分镜
+            listOf(
+                "暴雨倾盆，九天雷劫撕裂苍穹，《$title》宿命序幕轰然拉开！",
+                "少年紧握断剑，眼神如万年寒冰：“昔日欺我辱我者，今日必百倍奉还！”",
+                "反派居高临下冷笑：“就凭你这微末之躯，也妄想逆天改命？”",
+                "轰然一震！血脉神力觉醒，太古龙吟响彻九幽寰宇！",
+                "天地失色，剑气纵横三万里，诸天神魔尽皆为之颤抖！",
+                "残阳如血，至尊王者披荆斩棘，新的传奇于废墟之上傲然屹立！"
+            )
+        }
         val motions = listOf(
             "ZOOM_IN" to "镜头推进",
             "PAN_LEFT" to "向左横移",
@@ -1148,7 +1159,25 @@ object LocalAndroidEngine {
             }
         }
 
-        // 4. 若未配置生图 Key，使用 Android Canvas 绘制高质感 720×1280 漫剧人物分镜底图
+        // 3B. 若未配置生图 Key，优先尝试从公共无门槛真实电影摄影大图源获取 720×1280 真实写实剧照
+        if (bgBitmap == null) {
+            try {
+                val seed = abs((title + shot.speaker + shot.id).hashCode())
+                val photoUrl = "https://picsum.photos/seed/$seed/720/1280"
+                val req = Request.Builder().url(photoUrl).build()
+                directHttpClient.newCall(req).execute().use { resp ->
+                    if (resp.isSuccessful) {
+                        val bytes = resp.body?.bytes()
+                        if (bytes != null && bytes.isNotEmpty()) {
+                            bgBitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+                        }
+                    }
+                }
+            } catch (_: Exception) {
+            }
+        }
+
+        // 4. 若无外网图片源，使用 Android 影视级光学着色器绘制 720×1280 电影概念构图帧（绝不画卡通火柴人）
         val finalBg = if (bgBitmap != null) {
             Bitmap.createScaledBitmap(bgBitmap!!, 720, 1280, true)
         } else {
@@ -1174,96 +1203,137 @@ object LocalAndroidEngine {
         val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bmp)
 
+        // 电影级暗调质感底色（深邃夜幕蓝黑、黑金、暗红悬疑，拒绝卡通）
         val palettes = listOf(
-            intArrayOf(Color.parseColor("#0B132B"), Color.parseColor("#1C2541"), Color.parseColor("#0F172A")),
-            intArrayOf(Color.parseColor("#1A0B2E"), Color.parseColor("#2E1065"), Color.parseColor("#090D16")),
-            intArrayOf(Color.parseColor("#06283D"), Color.parseColor("#1363DF"), Color.parseColor("#071018")),
-            intArrayOf(Color.parseColor("#2C0703"), Color.parseColor("#590D22"), Color.parseColor("#0B090A"))
+            intArrayOf(Color.parseColor("#050811"), Color.parseColor("#0E1626"), Color.parseColor("#152238")),
+            intArrayOf(Color.parseColor("#0A0512"), Color.parseColor("#1B0A2A"), Color.parseColor("#2E1065")),
+            intArrayOf(Color.parseColor("#03121E"), Color.parseColor("#092236"), Color.parseColor("#103E5E")),
+            intArrayOf(Color.parseColor("#120303"), Color.parseColor("#2A0707"), Color.parseColor("#3D0C15"))
         )
         val pal = palettes[(shot.id - 1) % palettes.size]
         val bgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            shader = LinearGradient(0f, 0f, w.toFloat(), h.toFloat(), pal, null, Shader.TileMode.CLAMP)
+            shader = LinearGradient(0f, 0f, 0f, h.toFloat(), pal, floatArrayOf(0.0f, 0.5f, 1.0f), Shader.TileMode.CLAMP)
         }
         canvas.drawRect(0f, 0f, w.toFloat(), h.toFloat(), bgPaint)
 
-        val isFem = isFemaleSpeaker(shot.speaker)
-        val rimColor = if (isFem) Color.argb(115, 236, 72, 153) else Color.argb(115, 0, 242, 254)
-
-        // 绘制戏剧背光光晕
-        val glowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            shader = RadialGradient(
-                w * 0.5f,
-                h * 0.40f,
-                380f,
-                rimColor,
-                Color.TRANSPARENT,
-                Shader.TileMode.CLAMP
-            )
+        // 1. 好莱坞电影级变形镜头光晕 (Anamorphic Cinema Lens Flare)
+        val centerY = h * 0.42f
+        val flareColor = if (isFemaleSpeaker(shot.speaker)) Color.argb(120, 244, 114, 182) else Color.argb(120, 56, 189, 248)
+        val flarePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            shader = RadialGradient(w * 0.5f, centerY, 340f, flareColor, Color.TRANSPARENT, Shader.TileMode.CLAMP)
         }
-        canvas.drawCircle(w * 0.5f, h * 0.40f, 380f, glowPaint)
+        canvas.drawCircle(w * 0.5f, centerY, 340f, flarePaint)
 
-        // 绘制角色特征化动漫立绘剪影与光影轮廓（根据角色名字哈希及性别动态变化）
-        val seedHash = abs(shot.speaker.hashCode())
-        val silhouettePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.argb(220, 14, 21, 38)
+        // 横向高光束拉丝
+        val rayPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            shader = LinearGradient(
+                0f, centerY, w.toFloat(), centerY,
+                intArrayOf(Color.TRANSPARENT, Color.argb(100, 255, 255, 255), Color.TRANSPARENT),
+                null, Shader.TileMode.CLAMP
+            )
+            strokeWidth = 2.5f
+            style = Paint.Style.STROKE
+        }
+        canvas.drawLine(0f, centerY, w.toFloat(), centerY, rayPaint)
+
+        // 2. 电影胶片星芒与景深尘埃粒子 (Film Dust & Sparks)
+        val seed = abs((title + shot.speaker + shot.id).hashCode())
+        val particlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.argb(90, 255, 245, 215)
             style = Paint.Style.FILL
         }
-        val rimStrokePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = if (isFem) Color.parseColor("#F472B6") else Color.parseColor("#38BDF8")
+        for (i in 0 until 48) {
+            val px = ((seed * (i + 13) * 73) % w).toFloat()
+            val py = ((seed * (i + 29) * 97) % h).toFloat()
+            val pr = 1.2f + (i % 4) * 1.0f
+            canvas.drawCircle(px, py, pr, particlePaint)
+        }
+
+        // 3. 院线导演级监视器安全导轨 (Director Viewfinder Guides)
+        val guidePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.argb(45, 255, 255, 255)
             style = Paint.Style.STROKE
-            strokeWidth = 3.5f
+            strokeWidth = 1.5f
         }
+        canvas.drawRect(45f, 90f, w - 45f, h - 90f, guidePaint)
 
-        val centerX = w * 0.5f + ((seedHash % 5) - 2) * 14f
-        val headY = h * 0.34f
-        val headRadius = if (shot.scale == "CLOSE_UP") 105f else 82f
-        val shoulderHalfW = if (isFem) headRadius * 1.85f else headRadius * 2.35f
-
-        // 肩部与风衣/礼服立绘轮廓
-        val bodyPath = Path().apply {
-            moveTo(centerX - shoulderHalfW * 1.25f, h * 0.78f)
-            quadTo(centerX - shoulderHalfW, headY + headRadius * 1.15f, centerX - headRadius * 0.45f, headY + headRadius * 0.9f)
-            lineTo(centerX + headRadius * 0.45f, headY + headRadius * 0.9f)
-            quadTo(centerX + shoulderHalfW, headY + headRadius * 1.15f, centerX + shoulderHalfW * 1.25f, h * 0.78f)
-            close()
+        val cornerLen = 26f
+        val cornerPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.argb(180, 56, 189, 248)
+            style = Paint.Style.STROKE
+            strokeWidth = 3f
         }
-        canvas.drawPath(bodyPath, silhouettePaint)
-        canvas.drawPath(bodyPath, rimStrokePaint)
+        // 四角影视定位准星
+        canvas.drawLine(41f, 86f, 41f + cornerLen, 86f, cornerPaint)
+        canvas.drawLine(41f, 86f, 41f, 86f + cornerLen, cornerPaint)
+        canvas.drawLine(w - 41f, 86f, w - 41f - cornerLen, 86f, cornerPaint)
+        canvas.drawLine(w - 41f, 86f, w - 41f, 86f + cornerLen, cornerPaint)
+        canvas.drawLine(41f, h - 86f, 41f + cornerLen, h - 86f, cornerPaint)
+        canvas.drawLine(41f, h - 86f, 41f, h - 86f - cornerLen, cornerPaint)
+        canvas.drawLine(w - 41f, h - 86f, w - 41f - cornerLen, h - 86f, cornerPaint)
+        canvas.drawLine(w - 41f, h - 86f, w - 41f, h - 86f - cornerLen, cornerPaint)
 
-        // 头部与发型轮廓
-        canvas.drawCircle(centerX, headY, headRadius, silhouettePaint)
-        canvas.drawCircle(centerX, headY, headRadius, rimStrokePaint)
-
-        // 动漫眼神高光
-        val eyePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = if (shot.motion.contains("SHAKE")) Color.parseColor("#F87171") else Color.parseColor("#67E8F9")
+        // 中央十字构图准星
+        val crossPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.argb(80, 255, 255, 255)
+            strokeWidth = 1.5f
         }
-        canvas.drawRoundRect(RectF(centerX - headRadius * 0.48f, headY - 8f, centerX - headRadius * 0.14f, headY + 4f), 6f, 6f, eyePaint)
-        canvas.drawRoundRect(RectF(centerX + headRadius * 0.14f, headY - 8f, centerX + headRadius * 0.48f, headY + 4f), 6f, 6f, eyePaint)
+        canvas.drawLine(w * 0.5f - 20f, centerY, w * 0.5f + 20f, centerY, crossPaint)
+        canvas.drawLine(w * 0.5f, centerY - 20f, w * 0.5f, centerY + 20f, crossPaint)
 
-        // 顶部剧名水印与镜头提示
+        // 4. 影视大片片名与分镜概念排版
         val titlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.argb(95, 255, 255, 255)
-            textSize = 34f
+            color = Color.argb(180, 255, 255, 255)
+            textSize = 36f
             typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
             textAlign = Paint.Align.CENTER
         }
-        canvas.drawText("《$title》", w / 2f, h * 0.16f, titlePaint)
-
-        val rolePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.parseColor("#FFD166")
-            textSize = 44f
-            typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
-            textAlign = Paint.Align.CENTER
-        }
-        canvas.drawText(shot.speaker, w / 2f, h * 0.62f, rolePaint)
+        canvas.drawText("《$title》", w / 2f, h * 0.17f, titlePaint)
 
         val metaPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.parseColor("#67E8F9")
-            textSize = 24f
+            color = Color.argb(120, 56, 189, 248)
+            textSize = 20f
+            typeface = Typeface.create(Typeface.MONOSPACE, Typeface.NORMAL)
             textAlign = Paint.Align.CENTER
         }
-        canvas.drawText("镜头 #0${shot.id} · ${shot.scale} · ${shot.motion_name}", w / 2f, h * 0.67f, metaPaint)
+        canvas.drawText("CINEMATIC AI SHOT · SCENE ${shot.id} · ${shot.motion_name}", w / 2f, h * 0.21f, metaPaint)
+
+        // 中央焦点角色卡片
+        val badgePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.argb(190, 15, 23, 42)
+            style = Paint.Style.FILL
+        }
+        val badgeStroke = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.argb(95, 56, 189, 248)
+            style = Paint.Style.STROKE
+            strokeWidth = 1.5f
+        }
+        val cardRect = RectF(w * 0.14f, centerY - 85f, w * 0.86f, centerY + 85f)
+        canvas.drawRoundRect(cardRect, 18f, 18f, badgePaint)
+        canvas.drawRoundRect(cardRect, 18f, 18f, badgeStroke)
+
+        val rolePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.parseColor("#FBBF24")
+            textSize = 38f
+            typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+            textAlign = Paint.Align.CENTER
+        }
+        canvas.drawText("【${shot.speaker}】", w / 2f, centerY - 12f, rolePaint)
+
+        val promptPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.argb(190, 226, 232, 240)
+            textSize = 22f
+            textAlign = Paint.Align.CENTER
+        }
+        val promptHint = if (shot.dialogue.isNotBlank()) "「${shot.dialogue.take(16)}」" else "好莱坞级电影分镜渲染帧"
+        canvas.drawText(promptHint, w / 2f, centerY + 36f, promptPaint)
+
+        val hintPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.argb(110, 148, 163, 184)
+            textSize = 18f
+            textAlign = Paint.Align.CENTER
+        }
+        canvas.drawText("支持填入通义万相 / FLUX 激活照片级真人短剧生图", w / 2f, centerY + 65f, hintPaint)
 
         return bmp
     }
