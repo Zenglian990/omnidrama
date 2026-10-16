@@ -273,6 +273,8 @@ class RenderRequest(BaseModel):
     title: Optional[str] = ""
     genre: Optional[str] = ""
     novel_text: Optional[str] = ""
+    shots: Optional[List[Dict[str, Any]]] = None
+    characters: Optional[List[Dict[str, Any]]] = None
 
 
 @app.get("/api/project/render-status")
@@ -724,6 +726,15 @@ async def _run_production_pipeline(req: Optional[RenderRequest]):
     global RENDER_STATE
     _load_env_file()
 
+    RENDER_STATE["is_rendering"] = True
+    RENDER_STATE["error"] = None
+    RENDER_STATE["progress"] = 5
+    RENDER_STATE["step_index"] = 1
+    RENDER_STATE["current_step"] = "阶段 1/5：AI 总导演剧本拆解与反 PPT 感节奏调优"
+    RENDER_STATE["logs"] = [
+        f"🚀 [{_now_str()}] 曾练AI短剧创作 v1.8.0 (融合 OpenMontage 制片内核) · 真实制片流水线启动！"
+    ]
+
     try:
         from omnidrama.core.director import DirectorAgent
         from omnidrama.core.tts_engine import TTSEngine
@@ -748,15 +759,6 @@ async def _run_production_pipeline(req: Optional[RenderRequest]):
         from providers.dashscope_provider import DashScopeProvider
 
     try:
-        RENDER_STATE["is_rendering"] = True
-        RENDER_STATE["error"] = None
-        RENDER_STATE["progress"] = 10
-        RENDER_STATE["step_index"] = 1
-        RENDER_STATE["current_step"] = "阶段 1/5：AI 总导演剧本拆解与反 PPT 感节奏调优"
-        RENDER_STATE["logs"] = [
-            f"🚀 [{_now_str()}] 曾练AI短剧创作 v1.8.0 (融合 OpenMontage 制片内核) · 真实制片流水线启动！"
-        ]
-
         data = _load_project_data()
         title = (req.title if req and req.title else data.get("title", "至尊龙王归位")).strip()
         genre = (req.genre if req and req.genre else data.get("genre", "都市战神爽文")).strip()
@@ -809,12 +811,50 @@ async def _run_production_pipeline(req: Optional[RenderRequest]):
                     "audio": f"/api/shots/{s.shot_id}/audio",
                     "sfx": "惊雷劈裂 (Thunder)" if "SHAKE" in m_val else "无"
                 })
+        elif req and req.shots and len(req.shots) > 0:
+            shots_list = req.shots
+            chars_list = req.characters if req.characters else data.get("characters", [])
+            RENDER_STATE["logs"].append(
+                f"🎬 [{_now_str()}] 接收到移动端传入的《{title}》完整剧本分镜（共 {len(shots_list)} 镜）。"
+            )
         else:
             shots_list = data.get("shots", [])
             chars_list = data.get("characters", [])
-            RENDER_STATE["logs"].append(
-                f"🎬 [{_now_str()}] 读取当前工程《{title}》分镜脚本（共 {len(shots_list)} 镜，{len(chars_list)} 位角色）。"
-            )
+            if not shots_list:
+                RENDER_STATE["logs"].append(f"🎬 [{_now_str()}] 未检测到分镜数据，正在调用 AI 导演引擎自动生成《{title}》初始分镜...")
+                agent = DirectorAgent()
+                proj = await asyncio.to_thread(agent.breakdown_story, f"《{title}》精彩短剧开篇，矛盾冲突激烈，悬念迭起。", title, genre)
+                chars_list = []
+                for idx, c in enumerate(proj.characters):
+                    chars_list.append({
+                        "name": c.name,
+                        "role": "核心主角" if idx == 0 else "重要角色",
+                        "voice": "云希 (磁性沉稳霸道)" if c.gender == "male" else "晓晓 (尖酸刻薄逼迫)",
+                        "avatar": f"/api/shots/{min(idx + 1, len(proj.shots))}/image",
+                        "traits": c.visual_tags
+                    })
+                shots_list = []
+                for s in proj.shots:
+                    m_val = s.camera_motion.value.upper()
+                    m_name = "镜头震撼" if "SHAKE" in m_val else (
+                        "镜头拉远" if "OUT" in m_val else ("向左横移" if "PAN" in m_val else "镜头推进")
+                    )
+                    shots_list.append({
+                        "id": s.shot_id,
+                        "speaker": s.speaker,
+                        "scale": s.shot_scale.value.upper(),
+                        "motion": m_val,
+                        "motion_name": m_name,
+                        "dialogue": s.dialogue,
+                        "visual_prompt": s.visual_prompt,
+                        "image": f"/api/shots/{s.shot_id}/image",
+                        "audio": f"/api/shots/{s.shot_id}/audio",
+                        "sfx": "惊雷劈裂 (Thunder)" if "SHAKE" in m_val else "无"
+                    })
+            else:
+                RENDER_STATE["logs"].append(
+                    f"🎬 [{_now_str()}] 读取当前工程《{title}》分镜脚本（共 {len(shots_list)} 镜，{len(chars_list)} 位角色）。"
+                )
 
         # OpenMontage 质量门禁 1：渲染前反 PPT 感 6 维风险评分与自动调优
         shots_list, risk_before, risk_after, q_fixes = auto_optimize_storyboard(shots_list, genre=genre)

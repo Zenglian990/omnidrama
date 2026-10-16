@@ -91,6 +91,7 @@ fun StudioScreen() {
     val scope = rememberCoroutineScope()
     val repo = remember { DramaRepository() }
 
+    val prefs = remember { context.getSharedPreferences("omnidrama_prefs", Context.MODE_PRIVATE) }
     var serverUrl by remember {
         val saved = prefs.getString("server_url", "") ?: ""
         val effective = if (saved.isBlank() || saved.contains("loca.lt")) "https://omnidrama-79709693345.asia-east1.run.app" else saved

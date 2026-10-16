@@ -294,13 +294,18 @@ class DramaRepository {
         return@withContext LocalAndroidEngine.breakdownStoryOnPhone(context, title, genre, novelText)
     }
 
-    suspend fun triggerRender(baseUrl: String, title: String = "", genre: String = ""): Boolean = withContext(Dispatchers.IO) {
+    suspend fun triggerRender(baseUrl: String, project: ProjectData): Boolean = withContext(Dispatchers.IO) {
         if (baseUrl.isBlank()) return@withContext false
         try {
-            val payload = mapOf("title" to title, "genre" to genre)
+            val payload = mapOf(
+                "title" to project.title,
+                "genre" to project.genre,
+                "shots" to project.shots,
+                "characters" to project.characters
+            )
             val json = gson.toJson(payload)
             val req = Request.Builder()
-                .url("$baseUrl/api/project/render")
+                .url("${baseUrl.trimEnd('/')}/api/project/render")
                 .post(json.toRequestBody("application/json".toMediaType()))
                 .build()
             client.newCall(req).execute().use { resp ->
@@ -311,6 +316,9 @@ class DramaRepository {
             return@withContext false
         }
     }
+
+    suspend fun triggerRender(baseUrl: String, title: String, genre: String): Boolean =
+        triggerRender(baseUrl, ProjectData(title = title, genre = genre))
 
     suspend fun getRenderStatus(baseUrl: String): RenderStatusResponse? = withContext(Dispatchers.IO) {
         try {

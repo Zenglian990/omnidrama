@@ -28,8 +28,10 @@ import com.omnidrama.app.data.local.LocalAndroidEngine
 import com.omnidrama.app.data.model.ProjectData
 import com.omnidrama.app.data.model.RenderStatusResponse
 import com.omnidrama.app.data.repository.DramaRepository
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 
 @Composable
 fun ProductionStudioDialog(
@@ -50,8 +52,8 @@ fun ProductionStudioDialog(
                 is_rendering = true,
                 progress = 5,
                 step_index = 1,
-                current_step = "正在检测远程算力机房与手机独立硬件编码器...",
-                logs = listOf("🚀 启动《$title》全链路真实成片渲染引擎...")
+                current_step = "正在启动短剧制片引擎...",
+                logs = listOf("🚀 启动《${title.ifBlank { "创作者作品" }}》全链路成片渲染流程...")
             )
         )
     }
@@ -60,20 +62,37 @@ fun ProductionStudioDialog(
     var hasError by remember { mutableStateOf(false) }
     var usingLocalEngine by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
+    var renderJob by remember { mutableStateOf<Job?>(null) }
 
     suspend fun runPhoneHardwareRender() {
+        if (isComplete) return
         usingLocalEngine = true
         val logsList = renderStatus.logs.toMutableList()
-        logsList.add("📱 远程隧道未连接，已自动切换至【手机原生 MediaCodec H.264 硬件制片引擎】！")
+        logsList.add("📱 已启用【手机原生 MediaCodec H.264 独立硬件制片引擎】！")
         renderStatus = renderStatus.copy(
             is_rendering = true,
             progress = 10,
-            current_step = "📱 手机原生硬件引擎：正在准备分镜与API直连...",
+            current_step = "📱 手机原生硬件引擎：正在准备分镜与台词素材...",
             logs = logsList.toList()
         )
+
+        // 确保工程中包含有效分镜镜头
+        var validProject = project
+        if (validProject.shots.isEmpty()) {
+            logsList.add("🎬 正在基于《$title》自动解析镜头、角色与台词...")
+            renderStatus = renderStatus.copy(logs = logsList.toList())
+            val autoWork = LocalAndroidEngine.breakdownStoryOnPhone(
+                context = context,
+                title = title.ifBlank { "我的短剧" },
+                genre = genre.ifBlank { "精品短剧" },
+                novelText = ""
+            )
+            validProject = autoWork
+        }
+
         val mp4Path = LocalAndroidEngine.renderFullMp4OnPhone(
             context = context,
-            project = project,
+            project = validProject,
             onProgress = { prog, stepText, newLog ->
                 logsList.add(newLog)
                 renderStatus = renderStatus.copy(
@@ -84,55 +103,88 @@ fun ProductionStudioDialog(
                 )
             }
         )
-        if (mp4Path != null) {
+
+        if (!mp4Path.isNullOrBlank()) {
             renderStatus = renderStatus.copy(
                 is_rendering = false,
                 progress = 100,
-                current_step = "✅ 手机端 720×1280 H.264 MP4 成片压制完成！",
+                current_step = "✅ 720×1280 竖屏有声成片已生成！",
                 video_url = mp4Path,
                 logs = logsList.toList()
             )
+            val updatedWork = validProject.copy(
+                video_url = mp4Path,
+                live_actor_video = mp4Path
+            )
+            LocalAndroidEngine.saveCreatorWork(context, updatedWork)
             isComplete = true
         } else {
             hasError = true
             renderStatus = renderStatus.copy(
                 is_rendering = false,
-                current_step = "❌ 视频硬件编码失败，请先添加作品分镜后重试",
-                logs = logsList + "❌ 未检测到有效分镜，请先添加小说作品并拆解分镜。"
+                current_step = "❌ 视频压制未完成，请重试",
+                logs = logsList + "❌ 硬件编码未返回成片路径，请检查手机存储空间。"
             )
         }
     }
 
     LaunchedEffect(Unit) {
-        val started = repo.triggerRender(serverUrl, title, genre)
-        if (!started) {
-            // 无缝切换至手机原生 MediaCodec 硬件渲染，绝不卡死在 2%！
-            runPhoneHardwareRender()
-            return@LaunchedEffect
-        }
+        renderJob = launch {
+            // 1. 若未配置公网服务器，直接调用手机原生硬件引擎
+            val isRemotePossible = serverUrl.isNotBlank() &&
+                !serverUrl.contains("localhost") &&
+                !serverUrl.contains("127.0.0.1")
 
-        var failCount = 0
-        var finished = false
-        while (!finished) {
-            delay(1500)
-            val status = repo.getRenderStatus(serverUrl)
-            if (status != null) {
-                failCount = 0
-                renderStatus = status
-                if (status.error != null) {
-                    // 如果远程渲染异常，自动由手机硬件引擎兜底完成
-                    runPhoneHardwareRender()
-                    finished = true
-                } else if (status.progress >= 100 || (!status.is_rendering && status.progress > 0)) {
-                    finished = true
-                    isComplete = true
+            if (!isRemotePossible) {
+                runPhoneHardwareRender()
+                return@launch
+            }
+
+            // 2. 尝试向远端下发任务 (限时 2.5 秒)
+            val started = withTimeoutOrNull(2500L) {
+                try {
+                    repo.triggerRender(serverUrl, project)
+                } catch (_: Exception) {
+                    false
                 }
-            } else {
-                failCount++
-                if (failCount >= 3) {
-                    // 远程轮询中断时立即切换手机本地硬件编码完成制作
-                    runPhoneHardwareRender()
-                    finished = true
+            } ?: false
+
+            if (!started) {
+                runPhoneHardwareRender()
+                return@launch
+            }
+
+            // 3. 轮询远端状态；若远端空闲未开工 (progress=0 && !is_rendering) 超过 2 次，立即手机本地接管！
+            var failCount = 0
+            var idleCount = 0
+            var finished = false
+            while (!finished && !usingLocalEngine) {
+                delay(1200)
+                val status = repo.getRenderStatus(serverUrl)
+                if (status != null) {
+                    failCount = 0
+                    if (status.error != null) {
+                        runPhoneHardwareRender()
+                        finished = true
+                    } else if (status.progress >= 100 || (!status.is_rendering && status.progress > 0)) {
+                        renderStatus = status
+                        finished = true
+                        isComplete = true
+                    } else if (!status.is_rendering && status.progress == 0) {
+                        idleCount++
+                        if (idleCount >= 2) {
+                            runPhoneHardwareRender()
+                            finished = true
+                        }
+                    } else {
+                        renderStatus = status
+                    }
+                } else {
+                    failCount++
+                    if (failCount >= 2) {
+                        runPhoneHardwareRender()
+                        finished = true
+                    }
                 }
             }
         }
@@ -263,7 +315,28 @@ fun ProductionStudioDialog(
                     }
                 }
 
-                Spacer(modifier = Modifier.height(12.dp))
+                Spacer(modifier = Modifier.height(10.dp))
+
+                // 如果还在等待远端，显示可立即手动切换为手机本地压制按钮
+                if (!isComplete && !hasError && !usingLocalEngine) {
+                    Button(
+                        onClick = {
+                            scope.launch {
+                                renderJob?.cancel()
+                                runPhoneHardwareRender()
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1E293B)),
+                        shape = RoundedCornerShape(8.dp),
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(imageVector = Icons.Default.PhoneAndroid, contentDescription = null, tint = Color(0xFF38BDF8), modifier = Modifier.size(14.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("⚡ 立即切换为手机独立硬件极速压制", color = Color(0xFF38BDF8), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+                }
 
                 // 5大流水线工序卡片
                 Text(
@@ -399,7 +472,7 @@ fun ProductionStudioDialog(
                         Button(
                             onClick = {
                                 scope.launch {
-                                    if (usingLocalEngine && renderStatus.video_url.startsWith("/")) {
+                                    if (renderStatus.video_url.startsWith("/")) {
                                         val savedPath = LocalAndroidEngine.exportLocalMp4ToMovies(context, renderStatus.video_url, title)
                                         if (!savedPath.isNullOrBlank()) {
                                             Toast.makeText(context, "✅ 成片已导出至相册 Movies:\n$savedPath", Toast.LENGTH_LONG).show()
@@ -418,17 +491,34 @@ fun ProductionStudioDialog(
                         ) {
                             Icon(imageVector = Icons.Default.Download, contentDescription = null, tint = Color(0xFF0C101A))
                             Spacer(modifier = Modifier.width(4.dp))
-                            Text(if (usingLocalEngine) "保存至相册" else "剪映导出", color = Color(0xFF0C101A), fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                            Text(if (renderStatus.video_url.startsWith("/")) "保存至相册" else "剪映导出", color = Color(0xFF0C101A), fontWeight = FontWeight.Bold, fontSize = 12.sp)
                         }
                     }
                 } else if (hasError) {
-                    Button(
-                        onClick = onDismiss,
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF334155)),
+                    Row(
                         modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(10.dp)
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        Text("关闭窗口", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                        Button(
+                            onClick = {
+                                hasError = false
+                                scope.launch {
+                                    runPhoneHardwareRender()
+                                }
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00F2FE)),
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(10.dp)
+                        ) {
+                            Text("📱 手机硬件重新压制", color = Color(0xFF0C101A), fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                        }
+                        Button(
+                            onClick = onDismiss,
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF334155)),
+                            shape = RoundedCornerShape(10.dp)
+                        ) {
+                            Text("关闭", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                        }
                     }
                 } else {
                     Row(
@@ -442,7 +532,11 @@ fun ProductionStudioDialog(
                             strokeWidth = 2.dp
                         )
                         Spacer(modifier = Modifier.width(8.dp))
-                        Text("真实渲染压制中，请稍候...", color = Color(0xFF94A3B8), fontSize = 11.sp)
+                        Text(
+                            text = if (usingLocalEngine) "📱 手机原生硬件真实压制中..." else "真实渲染压制中，请稍候...",
+                            color = Color(0xFF94A3B8),
+                            fontSize = 11.sp
+                        )
                     }
                 }
             }
