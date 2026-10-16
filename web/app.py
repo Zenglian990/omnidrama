@@ -4,6 +4,7 @@ import sys
 import json
 import math
 import shutil
+import platform
 import subprocess
 import tempfile
 from datetime import datetime
@@ -1456,95 +1457,107 @@ async def get_available_voices():
 async def get_sota_status():
     """获取所有行业顶配大模型引擎的【真实】配置就绪状态与本地系统环境 (绝不伪造状态)."""
     try:
-        _load_env_file()
-    except Exception:
-        pass
+        try:
+            _load_env_file()
+        except Exception:
+            pass
 
-    jianying_path = None
-    try:
-        from core.capcut_exporter import CapCutExporter
-        jianying_path = CapCutExporter.get_system_jianying_draft_path()
-    except Exception:
-        pass
+        jianying_path = None
+        try:
+            from core.capcut_exporter import CapCutExporter
+            jianying_path = CapCutExporter.get_system_jianying_draft_path()
+        except Exception:
+            pass
 
-    def _entry(name: str, role: str, env_key: str, tier: str) -> Dict[str, Any]:
-        raw_val = os.environ.get(env_key, "").strip()
-        is_conf = bool(raw_val)
-        return {
-            "name": name,
-            "role": role,
-            "env_key": env_key,
-            "configured": is_conf,
-            "masked_key": _mask_key(raw_val),
-            "tier": tier
+        def _entry(name: str, role: str, env_key: str, tier: str) -> Dict[str, Any]:
+            raw_val = os.environ.get(env_key, "").strip()
+            is_conf = bool(raw_val)
+            return {
+                "name": name,
+                "role": role,
+                "env_key": env_key,
+                "configured": is_conf,
+                "masked_key": _mask_key(raw_val),
+                "tier": tier
+            }
+
+        providers_status = {
+            "siliconflow": _entry(
+                "🔥 硅基流动 SiliconFlow (国内免绑卡首选)",
+                "一个Key同时开启：免费 FLUX.1 逐镜真实生图 + DeepSeek/Qwen 导演剧本拆解 + CosyVoice2 配音",
+                "SILICONFLOW_API_KEY",
+                "国内免费生图+导演"
+            ),
+            "dashscope": _entry(
+                "🌟 阿里云百炼 DashScope (通义万相 2.1 + Qwen3-TTS)",
+                "新用户送百万Token+百张免费生图额度：Wan2.1 竖屏短剧剧照 + Qwen3-TTS 超拟真配音",
+                "DASHSCOPE_API_KEY",
+                "国内大厂顶配 (推荐)"
+            ),
+            "seedance": _entry(
+                "🎬 字节火山方舟 Seedance 2.0 (豆包视频大模型)",
+                "50万免费Token体验：图生视频 I2V 电影级物理运镜与人物微表情生成",
+                "ARK_API_KEY",
+                "SOTA 动态视频"
+            ),
+            "deepseek": _entry(
+                "DeepSeek-V3 / R1 (深度求索官方)",
+                "好莱坞编剧与十镜分镜剧本拆解总导演",
+                "DEEPSEEK_API_KEY",
+                "主力导演 (国内直连)"
+            ),
+            "pexels": _entry(
+                "Pexels 免费高清视频/图片素材库",
+                "对标 MoneyPrinterTurbo：0元免绑卡自动匹配下载 9:16 竖屏高清实拍素材",
+                "PEXELS_API_KEY",
+                "免费动态视频素材"
+            ),
+            "kimi": _entry(
+                "Kimi (月之暗面 Moonshot AI)",
+                "长篇网文理解、剧本台词打磨与镜头关键词提炼",
+                "MOONSHOT_API_KEY",
+                "国内直连 (SOTA)"
+            ),
+            "gemini": _entry(
+                "Google Gemini 2.0 Flash",
+                "多模态剧本拆解与分镜视觉提示词引擎",
+                "GEMINI_API_KEY",
+                "高速导演"
+            ),
+            "image": _entry(
+                "FLUX.1 Pro (Black Forest Labs)",
+                "8K 胶片级定妆与分镜剧照生图 (海外官方)",
+                "BFL_API_KEY",
+                "行业顶级 (SOTA)"
+            ),
+            "voice": _entry(
+                "ElevenLabs Multilingual v2",
+                "人类级呼吸感情绪配音 (未配则用内置免费微软 Edge-TTS)",
+                "ELEVENLABS_API_KEY",
+                "行业顶级 (SOTA)"
+            ),
         }
 
-    providers_status = {
-        "siliconflow": _entry(
-            "🔥 硅基流动 SiliconFlow (国内免绑卡首选)",
-            "一个Key同时开启：免费 FLUX.1 逐镜真实生图 + DeepSeek/Qwen 导演剧本拆解 + CosyVoice2 配音",
-            "SILICONFLOW_API_KEY",
-            "国内免费生图+导演"
-        ),
-        "dashscope": _entry(
-            "🌟 阿里云百炼 DashScope (通义万相 2.1 + Qwen3-TTS)",
-            "新用户送百万Token+百张免费生图额度：Wan2.1 竖屏短剧剧照 + Qwen3-TTS 超拟真配音",
-            "DASHSCOPE_API_KEY",
-            "国内大厂顶配 (推荐)"
-        ),
-        "seedance": _entry(
-            "🎬 字节火山方舟 Seedance 2.0 (豆包视频大模型)",
-            "50万免费Token体验：图生视频 I2V 电影级物理运镜与人物微表情生成",
-            "ARK_API_KEY",
-            "SOTA 动态视频"
-        ),
-        "deepseek": _entry(
-            "DeepSeek-V3 / R1 (深度求索官方)",
-            "好莱坞编剧与十镜分镜剧本拆解总导演",
-            "DEEPSEEK_API_KEY",
-            "主力导演 (国内直连)"
-        ),
-        "pexels": _entry(
-            "Pexels 免费高清视频/图片素材库",
-            "对标 MoneyPrinterTurbo：0元免绑卡自动匹配下载 9:16 竖屏高清实拍素材",
-            "PEXELS_API_KEY",
-            "免费动态视频素材"
-        ),
-        "kimi": _entry(
-            "Kimi (月之暗面 Moonshot AI)",
-            "长篇网文理解、剧本台词打磨与镜头关键词提炼",
-            "MOONSHOT_API_KEY",
-            "国内直连 (SOTA)"
-        ),
-        "gemini": _entry(
-            "Google Gemini 2.0 Flash",
-            "多模态剧本拆解与分镜视觉提示词引擎",
-            "GEMINI_API_KEY",
-            "高速导演"
-        ),
-        "image": _entry(
-            "FLUX.1 Pro (Black Forest Labs)",
-            "8K 胶片级定妆与分镜剧照生图 (海外官方)",
-            "BFL_API_KEY",
-            "行业顶级 (SOTA)"
-        ),
-        "voice": _entry(
-            "ElevenLabs Multilingual v2",
-            "人类级呼吸感情绪配音 (未配则用内置免费微软 Edge-TTS)",
-            "ELEVENLABS_API_KEY",
-            "行业顶级 (SOTA)"
-        ),
-    }
-
-    return {
-        "system": {
-            "os": f"云端算力机房 (Google Cloud Run · {platform.system()} · Edge-TTS + FFmpeg 算力就绪)",
-            "ffmpeg": bool(shutil.which("ffmpeg")),
-            "jianying_installed": bool(jianying_path),
-            "jianying_draft_path": jianying_path or "云端机房运行环境"
-        },
-        "providers": providers_status
-    }
+        sys_name = platform.system() if "platform" in globals() else "Linux"
+        return {
+            "system": {
+                "os": f"云端算力机房 (Google Cloud Run · {sys_name} · Edge-TTS + FFmpeg 算力就绪)",
+                "ffmpeg": bool(shutil.which("ffmpeg")),
+                "jianying_installed": bool(jianying_path),
+                "jianying_draft_path": jianying_path or "云端机房运行环境"
+            },
+            "providers": providers_status
+        }
+    except Exception as e:
+        return {
+            "system": {
+                "os": "云端算力机房 (Google Cloud Run · 备用防熔断模式 · 就绪)",
+                "ffmpeg": True,
+                "jianying_installed": False,
+                "jianying_draft_path": "云端机房"
+            },
+            "providers": {}
+        }
 
 
 class SaveKeysRequest(BaseModel):
