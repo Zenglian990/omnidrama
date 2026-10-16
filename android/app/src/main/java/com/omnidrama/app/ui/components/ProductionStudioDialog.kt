@@ -141,8 +141,8 @@ fun ProductionStudioDialog(
                 return@launch
             }
 
-            // 2. 尝试向远端下发任务 (限时 2.5 秒)
-            val started = withTimeoutOrNull(2500L) {
+            // 2. 尝试向远端下发任务 (限时 10 秒，避免网络握手导致过早回退)
+            val started = withTimeoutOrNull(10000L) {
                 try {
                     repo.triggerRender(serverUrl, project)
                 } catch (_: Exception) {
@@ -173,7 +173,7 @@ fun ProductionStudioDialog(
                         isComplete = true
                     } else if (!status.is_rendering && status.progress == 0) {
                         idleCount++
-                        if (idleCount >= 2) {
+                        if (idleCount >= 5) {
                             runPhoneHardwareRender()
                             finished = true
                         }
@@ -182,7 +182,7 @@ fun ProductionStudioDialog(
                     }
                 } else {
                     failCount++
-                    if (failCount >= 2) {
+                    if (failCount >= 4) {
                         runPhoneHardwareRender()
                         finished = true
                     }
@@ -191,13 +191,21 @@ fun ProductionStudioDialog(
         }
     }
 
+    val handleDismiss = {
+        if (isComplete) {
+            val finalUrl = if (renderStatus.video_url.isNotBlank()) renderStatus.video_url else "/api/video/stream?mode=full"
+            onFinished(finalUrl)
+        }
+        onDismiss()
+    }
+
     LaunchedEffect(renderStatus.logs.size) {
         if (renderStatus.logs.isNotEmpty()) {
             listState.animateScrollToItem(renderStatus.logs.size - 1)
         }
     }
 
-    Dialog(onDismissRequest = { onDismiss() }) {
+    Dialog(onDismissRequest = handleDismiss) {
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -254,7 +262,7 @@ fun ProductionStudioDialog(
                         }
                     }
 
-                    IconButton(onClick = onDismiss) {
+                    IconButton(onClick = handleDismiss) {
                         Icon(imageVector = Icons.Default.Close, contentDescription = "Close", tint = Color.White)
                     }
                 }

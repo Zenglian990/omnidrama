@@ -1015,6 +1015,7 @@ fun StudioScreen() {
         CharacterEditDialog(
             initialCharacter = editingCharacter,
             availableVoices = availableVoices,
+            serverUrl = serverUrl,
             onSave = { savedChar ->
                 scope.launch {
                     showCharacterEditDialog = false

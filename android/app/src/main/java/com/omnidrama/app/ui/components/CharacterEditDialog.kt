@@ -1,5 +1,6 @@
 package com.omnidrama.app.ui.components
 
+import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -11,32 +12,41 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
+import com.omnidrama.app.data.local.LocalAndroidEngine
 import com.omnidrama.app.data.model.CharacterItem
 import com.omnidrama.app.data.model.VoiceItem
 import com.omnidrama.app.ui.theme.*
+import kotlinx.coroutines.launch
 
 @Composable
 fun CharacterEditDialog(
     initialCharacter: CharacterItem? = null,
     availableVoices: List<VoiceItem> = emptyList(),
+    serverUrl: String = "",
     onSave: (CharacterItem) -> Unit,
     onDismiss: () -> Unit
 ) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     val isEdit = initialCharacter != null
     var name by remember { mutableStateOf(initialCharacter?.name ?: "") }
     var role by remember { mutableStateOf(initialCharacter?.role ?: "核心主角") }
     var selectedVoice by remember { mutableStateOf(initialCharacter?.voice ?: "云希 (磁性沉稳霸道)") }
     var traits by remember { mutableStateOf(initialCharacter?.traits ?: "") }
+    var isPlayingVoice by remember { mutableStateOf(false) }
 
     val defaultVoices = if (availableVoices.isNotEmpty()) availableVoices else listOf(
         VoiceItem("云希 (磁性沉稳霸道)", "zh-CN-YunxiNeural", "男霸总/战神", "male"),
@@ -159,6 +169,70 @@ fun CharacterEditDialog(
                                 )
                             }
                         }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "已选音色：${selectedVoice.substringBefore(" ")}",
+                        color = AccentGold,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+
+                    Button(
+                        onClick = {
+                            if (isPlayingVoice) {
+                                LocalAndroidEngine.stopAllAudio()
+                                isPlayingVoice = false
+                            } else {
+                                scope.launch {
+                                    val sampleSentence = when {
+                                        selectedVoice.contains("晓晓") -> "哼，凭你也配跟我平起平坐？别做梦了！"
+                                        selectedVoice.contains("晓涵") -> "既然命运让我们相遇，我便绝不负你。"
+                                        selectedVoice.contains("晓梦") -> "今天这件事，必须给我一个交代！"
+                                        selectedVoice.contains("云健") -> "在江城，还没有人敢这么跟我说话！"
+                                        selectedVoice.contains("云扬") -> "今日之辱，来日我必十倍奉还！"
+                                        selectedVoice.contains("云浩") -> "老夫纵横一生，岂容小辈放肆！"
+                                        else -> "天凉了，该让王氏集团彻底破产了。"
+                                    }
+                                    Toast.makeText(context, "🔊 正在试听【$selectedVoice】...", Toast.LENGTH_SHORT).show()
+                                    LocalAndroidEngine.playVoiceSampleGuaranteed(
+                                        context = context,
+                                        serverUrl = serverUrl,
+                                        voiceName = selectedVoice,
+                                        sampleText = sampleSentence,
+                                        onStart = { isPlayingVoice = true },
+                                        onComplete = { isPlayingVoice = false }
+                                    )
+                                }
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = if (isPlayingVoice) Color(0xFFF59E0B) else Color(0xFF1E283D)
+                        ),
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                        shape = RoundedCornerShape(6.dp),
+                        modifier = Modifier.height(30.dp)
+                    ) {
+                        Icon(
+                            imageVector = if (isPlayingVoice) Icons.Default.Stop else Icons.Default.VolumeUp,
+                            contentDescription = null,
+                            tint = if (isPlayingVoice) Color.Black else AccentEmerald,
+                            modifier = Modifier.size(13.dp)
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            text = if (isPlayingVoice) "停止试听" else "🔊 试听配音",
+                            color = if (isPlayingVoice) Color.Black else Color.White,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold
+                        )
                     }
                 }
 

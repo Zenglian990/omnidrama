@@ -217,7 +217,7 @@ object LocalAndroidEngine {
     }
 
     private fun isFemaleSpeaker(speaker: String): Boolean {
-        return speaker.any { it in "女姐母妻雪薇妃瑶琴妹娘柔晴月琳珊芸嫣" }
+        return speaker.any { it in "女姐母妻雪薇妃瑶琴妹娘柔晴月琳珊芸嫣晓" }
     }
 
     private fun resolveCosyVoice(speaker: String): String {
@@ -233,6 +233,34 @@ object LocalAndroidEngine {
     private fun applyVoiceCharacteristics(speaker: String) {
         val tts = ttsInstance ?: return
         when {
+            speaker.contains("晓晓") -> {
+                tts.setPitch(1.30f)
+                tts.setSpeechRate(1.10f)
+            }
+            speaker.contains("晓涵") -> {
+                tts.setPitch(1.15f)
+                tts.setSpeechRate(0.98f)
+            }
+            speaker.contains("晓梦") -> {
+                tts.setPitch(1.20f)
+                tts.setSpeechRate(1.05f)
+            }
+            speaker.contains("云健") -> {
+                tts.setPitch(0.96f)
+                tts.setSpeechRate(1.15f)
+            }
+            speaker.contains("云扬") -> {
+                tts.setPitch(1.02f)
+                tts.setSpeechRate(1.08f)
+            }
+            speaker.contains("云浩") -> {
+                tts.setPitch(0.72f)
+                tts.setSpeechRate(0.90f)
+            }
+            speaker.contains("云希") -> {
+                tts.setPitch(0.82f)
+                tts.setSpeechRate(0.98f)
+            }
             isFemaleSpeaker(speaker) -> {
                 tts.setPitch(1.22f)
                 tts.setSpeechRate(1.05f)
@@ -389,6 +417,80 @@ object LocalAndroidEngine {
         speakWithSystemTts(context, shot.speaker, shot.dialogue, onStart, onComplete)
     }
 
+    suspend fun playVoiceSampleGuaranteed(
+        context: Context,
+        serverUrl: String,
+        voiceName: String,
+        sampleText: String,
+        onStart: () -> Unit,
+        onComplete: () -> Unit
+    ) {
+        stopAllAudio()
+        val localDir = File(context.filesDir, "voice_previews")
+        localDir.mkdirs()
+        val previewMp3 = File(localDir, "preview_${voiceName.hashCode()}_${sampleText.hashCode()}.mp3")
+
+        // 1. 若配置了远程机房，尝试拉取真实 Edge-TTS 音频
+        if (!previewMp3.exists() && serverUrl.isNotBlank()) {
+            withContext(Dispatchers.IO) {
+                try {
+                    val fastClient = directHttpClient.newBuilder()
+                        .connectTimeout(3, TimeUnit.SECONDS)
+                        .readTimeout(6, TimeUnit.SECONDS)
+                        .build()
+                    val encVoice = java.net.URLEncoder.encode(voiceName, "UTF-8")
+                    val encText = java.net.URLEncoder.encode(sampleText, "UTF-8")
+                    val url = "${serverUrl.trimEnd('/')}/api/voices/preview?voice=$encVoice&text=$encText"
+                    val req = Request.Builder().url(url).build()
+                    fastClient.newCall(req).execute().use { resp ->
+                        if (resp.isSuccessful && resp.header("Content-Type")?.contains("audio") == true) {
+                            val bytes = resp.body?.bytes()
+                            if (bytes != null && bytes.size > 200) {
+                                previewMp3.writeBytes(bytes)
+                            }
+                        }
+                    }
+                } catch (_: Exception) {}
+            }
+        }
+
+        // 2. 若存在音频文件，使用 MediaPlayer 播放
+        if (previewMp3.exists() && previewMp3.length() > 200) {
+            try {
+                val mp = MediaPlayer().apply {
+                    setAudioAttributes(
+                        AudioAttributes.Builder()
+                            .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                            .setUsage(AudioAttributes.USAGE_MEDIA)
+                            .build()
+                    )
+                    setDataSource(previewMp3.absolutePath)
+                    setOnPreparedListener {
+                        onStart()
+                        start()
+                    }
+                    setOnCompletionListener {
+                        onComplete()
+                        release()
+                        activeMediaPlayer = null
+                    }
+                    setOnErrorListener { _, _, _ ->
+                        release()
+                        activeMediaPlayer = null
+                        speakWithSystemTts(context, voiceName, sampleText, onStart, onComplete)
+                        true
+                    }
+                    prepareAsync()
+                }
+                activeMediaPlayer = mp
+                return
+            } catch (_: Exception) {}
+        }
+
+        // 3. 手机端原生兜底：调用 TextToSpeech 并微调音色特征，100% 必响
+        speakWithSystemTts(context, voiceName, sampleText, onStart, onComplete)
+    }
+
     /**
      * 将单镜台词通过 Android 原生 TextToSpeech 渲染为本地 PCM WAV 文件，供 MP4 视频音轨混音压制使用
      */
@@ -511,17 +613,45 @@ object LocalAndroidEngine {
 
     suspend fun importFanqieUrlDirectly(urlOrId: String, serverUrl: String = ""): FanqieBookItem? = withContext(Dispatchers.IO) {
         val text = urlOrId.trim()
-        val pageMatch = Regex("/page/(\\d{15,22})").find(text)
+        val pageMatch = Regex("(?:/page/|/share/book/|book_id=|itemId=)(\\d{15,22})").find(text)
         if (pageMatch != null) {
-            return@withContext fetchFanqieBookByIdDirectly(pageMatch.groupValues[1])
+            val direct = fetchFanqieBookByIdDirectly(pageMatch.groupValues[1])
+            if (direct != null && direct.title.isNotBlank()) return@withContext direct
         }
         val readerMatch = Regex("/reader/(\\d{15,22})").find(text)
         if (readerMatch != null) {
-            return@withContext fetchFanqieChapterDirectly(readerMatch.groupValues[1])
+            val direct = fetchFanqieChapterDirectly(readerMatch.groupValues[1])
+            if (direct != null && direct.title.isNotBlank()) return@withContext direct
         }
         val rawIdMatch = Regex("\\b(\\d{15,22})\\b").find(text)
         if (rawIdMatch != null) {
-            return@withContext fetchFanqieBookByIdDirectly(rawIdMatch.groupValues[1])
+            val direct = fetchFanqieBookByIdDirectly(rawIdMatch.groupValues[1])
+            if (direct != null && direct.title.isNotBlank()) return@withContext direct
+        }
+
+        // 尝试通过远端服务器代理解析 (具备全功能爬虫与代理，双重保障)
+        if (serverUrl.isNotBlank()) {
+            try {
+                val payload = mapOf("url_or_id" to text)
+                val json = gson.toJson(payload)
+                val req = Request.Builder()
+                    .url("${serverUrl.trimEnd('/')}/api/fanqie/import")
+                    .post(json.toRequestBody("application/json".toMediaType()))
+                    .build()
+                val fastClient = directHttpClient.newBuilder()
+                    .connectTimeout(5, TimeUnit.SECONDS)
+                    .readTimeout(10, TimeUnit.SECONDS)
+                    .build()
+                fastClient.newCall(req).execute().use { resp ->
+                    if (resp.isSuccessful) {
+                        val body = resp.body?.string() ?: ""
+                        val jsonObj = com.google.gson.JsonParser.parseString(body).asJsonObject
+                        if (jsonObj.has("book")) {
+                            return@withContext gson.fromJson(jsonObj.get("book"), FanqieBookItem::class.java)
+                        }
+                    }
+                }
+            } catch (_: Exception) {}
         }
         return@withContext null
     }

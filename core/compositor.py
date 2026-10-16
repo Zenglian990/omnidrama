@@ -4,8 +4,10 @@ import subprocess
 import json
 import tempfile
 from pathlib import Path
-from typing import List, Optional
-from omnidrama.schemas.drama_schema import CameraMotionEnum
+try:
+    from omnidrama.schemas.drama_schema import CameraMotionEnum
+except ImportError:
+    from schemas.drama_schema import CameraMotionEnum
 
 
 class VideoCompositor:

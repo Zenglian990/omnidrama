@@ -5,10 +5,16 @@ from pathlib import Path
 from typing import Dict, Any, Optional
 from PIL import Image, ImageDraw, ImageFont
 
-from omnidrama.schemas.drama_schema import DramaProject, Shot, CameraMotionEnum
-from omnidrama.core.director import DirectorAgent
-from omnidrama.core.tts_engine import TTSEngine
-from omnidrama.core.compositor import VideoCompositor
+try:
+    from omnidrama.schemas.drama_schema import DramaProject, Shot, CameraMotionEnum
+    from omnidrama.core.director import DirectorAgent
+    from omnidrama.core.tts_engine import TTSEngine
+    from omnidrama.core.compositor import VideoCompositor
+except ImportError:
+    from schemas.drama_schema import DramaProject, Shot, CameraMotionEnum
+    from core.director import DirectorAgent
+    from core.tts_engine import TTSEngine
+    from core.compositor import VideoCompositor
 
 
 class OmniDramaPipeline:

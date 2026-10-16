@@ -1223,6 +1223,15 @@ async def trigger_render_pipeline(req: Optional[RenderRequest] = None, backgroun
     if RENDER_STATE["is_rendering"]:
         return {"status": "already_running", "message": "制片机房正在全负荷真实渲染中...", "state": RENDER_STATE}
 
+    RENDER_STATE["is_rendering"] = True
+    RENDER_STATE["progress"] = 5
+    RENDER_STATE["step_index"] = 1
+    RENDER_STATE["current_step"] = "阶段 1/5：AI 总导演剧本拆解与反 PPT 感节奏调优"
+    RENDER_STATE["logs"] = [
+        f"🚀 [{_now_str()}] 曾练AI短剧创作 · 真实制片流水线启动！"
+    ]
+    RENDER_STATE["error"] = None
+
     if background_tasks:
         background_tasks.add_task(_run_production_pipeline, req)
     else:
@@ -1493,6 +1502,64 @@ async def get_available_voices():
     ]
 
 
+@app.get("/api/voices/preview")
+async def preview_voice(voice: str = "zh-CN-YunxiNeural", text: str = ""):
+    """真实试听指定音色母带样例音频 (微软 Edge-TTS / SiliconFlow CosyVoice2 / ElevenLabs 真实发音)."""
+    try:
+        from omnidrama.core.tts_engine import TTSEngine
+    except ImportError:
+        from core.tts_engine import TTSEngine
+
+    tts_engine = TTSEngine()
+
+    voice_name_to_code = {
+        "云希": "zh-CN-YunxiNeural",
+        "云健": "zh-CN-YunjianNeural",
+        "云扬": "zh-CN-YunyangNeural",
+        "云浩": "zh-CN-YunhaoNeural",
+        "晓晓": "zh-CN-XiaoxiaoNeural",
+        "晓涵": "zh-CN-XiaohanNeural",
+        "晓梦": "zh-CN-XiaomengNeural",
+        "东北晓贝": "zh-CN-liaoning-XiaobeiNeural",
+        "陕西晓妮": "zh-CN-shaanxi-XiaoniNeural",
+        "Christopher": "en-US-ChristopherNeural",
+        "Jenny": "en-US-JennyNeural"
+    }
+    voice_code = voice
+    for k, code in voice_name_to_code.items():
+        if k in voice:
+            voice_code = code
+            break
+
+    sample_text = text.strip()
+    if not sample_text:
+        if "Xiaoxiao" in voice_code:
+            sample_text = "哼，凭你也配跟我平起平坐？别做梦了！"
+        elif "Xiaohan" in voice_code:
+            sample_text = "既然命运让我们相遇，我便绝不负你。"
+        elif "Xiaomeng" in voice_code:
+            sample_text = "今天这件事，必须给我一个交代！"
+        elif "Yunjian" in voice_code:
+            sample_text = "在江城，还没有人敢这么跟我说话！"
+        elif "Yunyang" in voice_code:
+            sample_text = "今日之辱，来日我必十倍奉还！"
+        elif "Yunhao" in voice_code:
+            sample_text = "老夫纵横一生，岂容小辈放肆！"
+        elif "en-US" in voice_code:
+            sample_text = "I will reclaim everything that once belonged to me."
+        else:
+            sample_text = "天凉了，该让王氏集团彻底破产了。"
+
+    preview_dir = OUTPUT_DIR / "voice_previews"
+    preview_dir.mkdir(parents=True, exist_ok=True)
+    out_file = preview_dir / f"{voice_code}_{abs(hash(sample_text))}.mp3"
+
+    if not out_file.exists():
+        await tts_engine.generate_speech(text=sample_text, voice=voice_code, output_path=str(out_file))
+
+    return FileResponse(str(out_file), media_type="audio/mpeg")
+
+
 @app.get("/api/sota/status")
 async def get_sota_status():
     """获取所有行业顶配大模型引擎的【真实】配置就绪状态与本地系统环境 (绝不伪造状态)."""
@@ -1722,7 +1789,11 @@ async def split_novel_endpoint(req: SplitNovelRequest):
 
 
 class FanqieImportRequest(BaseModel):
-    url_or_id: str
+    url_or_id: Optional[str] = ""
+    url: Optional[str] = ""
+
+    def get_target(self) -> str:
+        return (self.url_or_id or self.url or "").strip()
 
 
 @app.get("/api/fanqie/rank")
@@ -1749,7 +1820,10 @@ async def import_fanqie_book(req: FanqieImportRequest):
     except ImportError:
         from providers.fanqie_provider import FanqieProvider
     try:
-        book = await asyncio.to_thread(FanqieProvider.fetch_book_by_url_or_id, req.url_or_id)
+        target = req.get_target()
+        if not target:
+            raise ValueError("请提供番茄小说链接或作品 ID")
+        book = await asyncio.to_thread(FanqieProvider.fetch_book_by_url_or_id, target)
         return {"status": "success", "book": book}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))

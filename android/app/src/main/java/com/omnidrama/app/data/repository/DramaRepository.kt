@@ -14,8 +14,8 @@ import java.util.concurrent.TimeUnit
 
 class DramaRepository {
     private val client = OkHttpClient.Builder()
-        .connectTimeout(4, TimeUnit.SECONDS)
-        .readTimeout(20, TimeUnit.SECONDS)
+        .connectTimeout(10, TimeUnit.SECONDS)
+        .readTimeout(45, TimeUnit.SECONDS)
         .addInterceptor { chain ->
             val newReq = chain.request().newBuilder()
                 .addHeader("Bypass-Tunnel-Reminder", "true")

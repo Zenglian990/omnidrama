@@ -16,8 +16,10 @@ import edge_tts.constants
 import edge_tts.communicate
 import edge_tts.drm
 from datetime import timezone as _tz
-from email.utils import parsedate_to_datetime as _parsedate_to_datetime
-from omnidrama.schemas.drama_schema import Shot
+try:
+    from omnidrama.schemas.drama_schema import Shot
+except ImportError:
+    from schemas.drama_schema import Shot
 
 # 2026-10 微软 Edge-TTS 403 修复补丁：
 # 旧版 speech.platform.bing.com WebSocket 合成端点已于 2026 年 10 月拒绝请求 (403)，
