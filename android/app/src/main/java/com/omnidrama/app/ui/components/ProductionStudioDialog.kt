@@ -28,6 +28,7 @@ import com.omnidrama.app.data.local.LocalAndroidEngine
 import com.omnidrama.app.data.model.ProjectData
 import com.omnidrama.app.data.model.RenderStatusResponse
 import com.omnidrama.app.data.repository.DramaRepository
+import com.omnidrama.app.ui.screens.downloadVideoToPhone
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -471,27 +472,15 @@ fun ProductionStudioDialog(
 
                         Button(
                             onClick = {
-                                scope.launch {
-                                    if (renderStatus.video_url.startsWith("/")) {
-                                        val savedPath = LocalAndroidEngine.exportLocalMp4ToMovies(context, renderStatus.video_url, title)
-                                        if (!savedPath.isNullOrBlank()) {
-                                            Toast.makeText(context, "✅ 成片已导出至相册 Movies:\n$savedPath", Toast.LENGTH_LONG).show()
-                                        } else {
-                                            Toast.makeText(context, "❌ 导出至相册失败，请重试", Toast.LENGTH_LONG).show()
-                                        }
-                                    } else {
-                                        Toast.makeText(context, "正在注入剪映草稿箱...", Toast.LENGTH_SHORT).show()
-                                        val msg = repo.exportJianying(serverUrl)
-                                        Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
-                                    }
-                                }
+                                val vUrl = renderStatus.video_url.ifBlank { project.video_url }
+                                downloadVideoToPhone(context, vUrl, serverUrl, title)
                             },
                             colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFFB800)),
                             shape = RoundedCornerShape(10.dp)
                         ) {
                             Icon(imageVector = Icons.Default.Download, contentDescription = null, tint = Color(0xFF0C101A))
                             Spacer(modifier = Modifier.width(4.dp))
-                            Text(if (renderStatus.video_url.startsWith("/")) "保存至相册" else "剪映导出", color = Color(0xFF0C101A), fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                            Text("📥 保存至手机相册", color = Color(0xFF0C101A), fontWeight = FontWeight.Bold, fontSize = 12.sp)
                         }
                     }
                 } else if (hasError) {
