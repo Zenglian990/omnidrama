@@ -108,6 +108,39 @@
         </select>
 
         <button 
+          @click="openScriptModal" 
+          class="px-3 py-1.5 rounded-lg bg-gradient-to-r from-orange-600/80 to-red-600/80 hover:from-orange-500 hover:to-red-500 text-white text-xs font-bold transition flex items-center space-x-1.5 shadow"
+        >
+          <i class="fa-solid fa-fire-flame-curved"></i>
+          <span>AI 灵感编剧 / 番茄热榜</span>
+        </button>
+
+        <button 
+          @click="triggerRenderPipeline" 
+          :disabled="renderState.is_rendering"
+          class="px-3 py-1.5 rounded-lg bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-black font-bold text-xs transition flex items-center space-x-1.5 shadow disabled:opacity-50"
+        >
+          <i class="fa-solid fa-rocket"></i>
+          <span>{{ renderState.is_rendering ? `合成中 (${renderState.progress}%)` : '🚀 5阶段合成成片' }}</span>
+        </button>
+
+        <button 
+          @click="showRefModal = true" 
+          class="px-3 py-1.5 rounded-lg bg-gradient-to-r from-rose-900/70 to-orange-900/70 hover:from-rose-800 hover:to-orange-800 border border-rose-500/40 text-rose-200 text-xs font-semibold transition flex items-center space-x-1.5 shadow"
+        >
+          <i class="fa-solid fa-wand-magic-sparkles text-rose-400"></i>
+          <span>🎯 爆款视频拆解仿写</span>
+        </button>
+
+        <button 
+          @click="openQualityModal" 
+          class="px-3 py-1.5 rounded-lg bg-gradient-to-r from-indigo-900/70 to-cyan-900/70 hover:from-indigo-800 hover:to-cyan-800 border border-cyan-500/40 text-cyan-200 text-xs font-semibold transition flex items-center space-x-1.5 shadow"
+        >
+          <i class="fa-solid fa-shield-halved text-cyan-400"></i>
+          <span>🛡️ 导演质检与账单</span>
+        </button>
+
+        <button 
           @click="showSotaModal = true" 
           class="px-3 py-1.5 rounded-lg bg-gradient-to-r from-purple-900/60 to-pink-900/60 hover:from-purple-800 hover:to-pink-800 border border-purple-500/40 text-purple-200 text-xs font-semibold transition flex items-center space-x-1.5 shadow"
         >
@@ -124,7 +157,7 @@
           <span>{{ isExporting ? t('exporting') : t('export_capcut') }}</span>
         </button>
 
-        <a :href="project.video_url" download class="px-3.5 py-1.5 rounded-lg bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-black font-semibold text-xs transition flex items-center space-x-1.5 shadow-lg shadow-cyan-500/20">
+        <a v-if="project.video_url" :href="`/api/video/download?mode=${activeVideoMode}`" download class="px-3.5 py-1.5 rounded-lg bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-black font-semibold text-xs transition flex items-center space-x-1.5 shadow-lg shadow-cyan-500/20">
           <i class="fa-solid fa-download"></i>
           <span>{{ t('download_film') }}</span>
         </a>
@@ -184,7 +217,7 @@
         <!-- 系统提示 -->
         <div class="mt-auto p-3 rounded-lg bg-cyan-950/20 border border-cyan-800/30 text-[11px] text-gray-400">
           <i class="fa-solid fa-circle-check text-brand-cyan mr-1"></i>
-          <span>角色锁脸已固化，全片 10 个分镜已完成音画对齐。</span>
+          <span>角色固定 Seed 已开启，全片 {{ project.shots.length }} 个分镜音画对齐。</span>
         </div>
       </aside>
 
@@ -195,7 +228,7 @@
         <div class="h-11 px-6 border-b border-brand-border bg-brand-dark/50 flex items-center justify-between flex-shrink-0">
           <div class="text-xs font-bold text-gray-300 flex items-center space-x-2">
             <span><i class="fa-solid fa-clapperboard text-brand-cyan mr-1.5"></i> 全部分镜列表 (Storyboard Flow)</span>
-            <span class="text-gray-500 font-normal">点击任意分镜可在右侧立即试听与检查</span>
+            <span class="text-gray-500 font-normal">点击任意分镜可试听配音或精修台词与重绘画面</span>
           </div>
           <div class="text-[11px] text-gray-400 flex items-center space-x-3">
             <span><span class="w-2 h-2 rounded-full bg-cyan-400 inline-block mr-1"></span>推镜头 (Zoom-In)</span>
@@ -215,7 +248,7 @@
           >
             <!-- 缩略图 -->
             <div class="w-24 h-40 rounded-lg overflow-hidden bg-black flex-shrink-0 relative border border-gray-800">
-              <img :src="shot.image" class="w-full h-full object-cover">
+              <img :src="`${shot.image}?t=${cacheBust}`" class="w-full h-full object-cover">
               <span class="absolute top-1 left-1 px-1.5 py-0.5 rounded bg-black/80 text-[10px] text-brand-cyan font-bold font-mono">
                 #{{ shot.id < 10 ? '0' + shot.id : shot.id }}
               </span>
@@ -225,16 +258,25 @@
             <div class="flex-1 flex flex-col justify-between py-1">
               <div>
                 <!-- 镜头标签 -->
-                <div class="flex items-center space-x-2 mb-2">
-                  <span class="px-2 py-0.5 rounded text-[10px] font-bold bg-brand-border text-cyan-300">
-                    {{ shot.scale }}
-                  </span>
-                  <span class="px-2 py-0.5 rounded text-[10px] font-bold bg-purple-950 text-purple-300 border border-purple-800">
-                    {{ shot.motion_name }}
-                  </span>
-                  <span v-if="shot.sfx !== '无'" class="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-950 text-amber-300 border border-amber-800">
-                    <i class="fa-solid fa-bolt mr-1"></i>{{ shot.sfx }}
-                  </span>
+                <div class="flex items-center justify-between mb-2">
+                  <div class="flex items-center space-x-2">
+                    <span class="px-2 py-0.5 rounded text-[10px] font-bold bg-brand-border text-cyan-300">
+                      {{ shot.scale }}
+                    </span>
+                    <span class="px-2 py-0.5 rounded text-[10px] font-bold bg-purple-950 text-purple-300 border border-purple-800">
+                      {{ shot.motion_name }}
+                    </span>
+                    <span v-if="shot.sfx !== '无'" class="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-950 text-amber-300 border border-amber-800">
+                      <i class="fa-solid fa-bolt mr-1"></i>{{ shot.sfx }}
+                    </span>
+                  </div>
+                  <button 
+                    @click.stop="openShotEditor(shot)"
+                    class="px-2.5 py-1 rounded bg-brand-dark hover:bg-brand-border border border-cyan-500/40 text-[11px] text-brand-cyan flex items-center space-x-1 transition"
+                  >
+                    <i class="fa-solid fa-pen-to-square"></i>
+                    <span>改词/重绘</span>
+                  </button>
                 </div>
 
                 <!-- 说话人与台词 -->
@@ -248,7 +290,7 @@
 
               <!-- 底部音频控制器 -->
               <div class="flex items-center justify-between border-t border-gray-800/80 pt-2 mt-2">
-                <audio :src="shot.audio" controls class="h-6 w-56"></audio>
+                <audio :src="`${shot.audio}?t=${cacheBust}`" controls class="h-6 w-56"></audio>
                 <div class="text-[11px] text-gray-500">
                   <i class="fa-solid fa-check-circle text-emerald-400 mr-1"></i>音视频对齐
                 </div>
@@ -539,6 +581,217 @@
       </div>
     </div>
 
+    <!-- AI 灵感编剧与番茄小说实时热榜导入 Modal -->
+    <div v-if="showScriptModal" class="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+      <div class="w-full max-w-2xl bg-brand-card border border-brand-border rounded-2xl shadow-2xl flex flex-col max-h-[88vh] overflow-hidden">
+        <div class="px-6 py-4 border-b border-brand-border flex items-center justify-between bg-brand-dark">
+          <div class="flex items-center space-x-2.5">
+            <i class="fa-solid fa-fire-flame-curved text-orange-400 text-lg"></i>
+            <div>
+              <h3 class="font-bold text-sm text-gray-100">AI 灵感编剧 & 番茄小说实时热榜导入</h3>
+              <p class="text-[11px] text-gray-400">支持一键抓取番茄小说热榜或自定义网文拆解 8-12 镜分镜</p>
+            </div>
+          </div>
+          <button @click="showScriptModal = false" class="text-gray-400 hover:text-white"><i class="fa-solid fa-xmark text-lg"></i></button>
+        </div>
+
+        <div class="p-6 overflow-y-auto space-y-4 text-xs">
+          <!-- 番茄热榜区 -->
+          <div class="p-3.5 rounded-xl bg-brand-dark border border-orange-500/30 space-y-2.5">
+            <div class="flex items-center justify-between">
+              <span class="font-bold text-orange-300">🍅 番茄小说网实时热榜直通车</span>
+              <button @click="fetchFanqieRank" class="px-2.5 py-1 rounded bg-orange-600/30 hover:bg-orange-600/50 text-orange-200 border border-orange-500/40">
+                {{ isFetchingRank ? '抓取中...' : '🔥 刷新实时热榜' }}
+              </button>
+            </div>
+            <div v-if="fanqieBooks.length > 0" class="grid grid-cols-2 gap-2 max-h-36 overflow-y-auto">
+              <div v-for="b in fanqieBooks" :key="b.book_id" @click="selectFanqieBook(b)" class="p-2 rounded bg-brand-card hover:border-orange-400 border border-brand-border cursor-pointer transition">
+                <div class="font-bold text-gray-100 truncate">《{{ b.title }}》</div>
+                <div class="text-[10px] text-orange-300">{{ b.category }} · {{ b.author }}</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="block text-gray-400 mb-1">短剧剧名</label>
+              <input v-model="scriptForm.title" type="text" placeholder="输入短剧名称..." class="w-full bg-brand-dark border border-brand-border rounded-lg px-3 py-2 text-gray-100">
+            </div>
+            <div>
+              <label class="block text-gray-400 mb-1">短剧题材风格</label>
+              <input v-model="scriptForm.genre" type="text" placeholder="如：都市战神 / 仙侠玄幻 / 豪门虐恋" class="w-full bg-brand-dark border border-brand-border rounded-lg px-3 py-2 text-gray-100">
+            </div>
+          </div>
+
+          <div>
+            <label class="block text-gray-400 mb-1">小说章节正文 / 剧情大纲</label>
+            <textarea v-model="scriptForm.novel_text" rows="6" placeholder="粘贴小说正文或剧情梗概..." class="w-full bg-brand-dark border border-brand-border rounded-lg p-3 text-gray-100"></textarea>
+          </div>
+        </div>
+
+        <div class="px-6 py-3.5 border-t border-brand-border bg-brand-dark flex justify-end space-x-3">
+          <button @click="showScriptModal = false" class="px-4 py-1.5 rounded-lg text-xs text-gray-400">取消</button>
+          <button @click="generateNewScript" :disabled="isGeneratingScript" class="px-5 py-1.5 rounded-lg bg-gradient-to-r from-orange-500 to-red-500 text-white font-bold text-xs shadow-lg disabled:opacity-50">
+            {{ isGeneratingScript ? 'AI 导演拆解中...' : '🎬 一键生成全套分镜脚本' }}
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 单镜精修弹窗 (Shot Editor Modal) -->
+    <div v-if="editingShot" class="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+      <div class="w-full max-w-lg bg-brand-card border border-brand-border rounded-2xl shadow-2xl overflow-hidden text-xs">
+        <div class="px-6 py-4 border-b border-brand-border flex items-center justify-between bg-brand-dark">
+          <h3 class="font-bold text-sm text-brand-cyan">✏️ 单分镜精修工作台 (第 #{{ editingShot.id }} 镜)</h3>
+          <button @click="editingShot = null" class="text-gray-400 hover:text-white"><i class="fa-solid fa-xmark text-lg"></i></button>
+        </div>
+        <div class="p-6 space-y-3.5">
+          <div>
+            <label class="block text-gray-400 mb-1">说话角色 (Speaker)</label>
+            <input v-model="editingShot.speaker" type="text" class="w-full bg-brand-dark border border-brand-border rounded-lg px-3 py-2 text-gray-100">
+          </div>
+          <div>
+            <label class="block text-gray-400 mb-1">台词对白 / 旁白描述</label>
+            <textarea v-model="editingShot.dialogue" rows="3" class="w-full bg-brand-dark border border-brand-border rounded-lg p-2.5 text-gray-100"></textarea>
+          </div>
+          <div>
+            <label class="block text-gray-400 mb-1">AI 生图英文提示词 (Visual Prompt)</label>
+            <textarea v-model="editingShot.visual_prompt" rows="2" class="w-full bg-brand-dark border border-brand-border rounded-lg p-2.5 text-gray-300"></textarea>
+          </div>
+          <div class="flex items-center space-x-6 pt-1">
+            <label class="flex items-center space-x-2 cursor-pointer">
+              <input type="checkbox" v-model="editingShot.regenerate_image" class="accent-cyan-400">
+              <span class="text-gray-200">🎨 重绘本镜画面</span>
+            </label>
+            <label class="flex items-center space-x-2 cursor-pointer">
+              <input type="checkbox" v-model="editingShot.regenerate_audio" class="accent-cyan-400">
+              <span class="text-gray-200">🎙️ 重录本镜配音</span>
+            </label>
+          </div>
+        </div>
+        <div class="px-6 py-3.5 border-t border-brand-border bg-brand-dark flex justify-end space-x-3">
+          <button @click="editingShot = null" class="px-4 py-1.5 rounded-lg text-gray-400">取消</button>
+          <button @click="saveShotEdit" :disabled="isSavingShot" class="px-5 py-1.5 rounded-lg bg-gradient-to-r from-cyan-500 to-blue-600 text-black font-bold shadow disabled:opacity-50">
+            {{ isSavingShot ? '正在精修合成...' : '保存并立即生效' }}
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 爆款参考视频逆向拆解与仿写弹窗 (Reference Video Analyst Modal) -->
+    <div v-if="showRefModal" class="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+      <div class="w-full max-w-3xl bg-brand-card border border-rose-500/40 rounded-2xl shadow-2xl overflow-hidden text-xs">
+        <div class="px-6 py-4 border-b border-brand-border flex items-center justify-between bg-brand-dark">
+          <div>
+            <h3 class="font-bold text-sm text-rose-300">🎯 爆款参考视频逆向拆解与 1:1 节奏仿写 (OpenMontage Reference Analyst)</h3>
+            <p class="text-[11px] text-gray-400 mt-0.5">基于 CMU/Harvard CHAI 剪辑理论：FFmpeg 场景切点探测 → 黄金3秒钩子分析 → 1:1 复刻切镜节拍到新小说</p>
+          </div>
+          <button @click="showRefModal = false" class="text-gray-400 hover:text-white"><i class="fa-solid fa-xmark text-lg"></i></button>
+        </div>
+        <div class="p-6 space-y-4 max-h-[75vh] overflow-y-auto">
+          <div class="grid grid-cols-2 gap-4">
+            <div>
+              <label class="block text-gray-400 mb-1">参考爆款视频路径 / URL (留空自动使用黄金短剧卡点模板或本地样片)</label>
+              <input v-model="refForm.video_source" type="text" placeholder="例如: C:\videos\viral_hook.mp4 或留空" class="w-full bg-brand-dark border border-brand-border rounded-lg px-3 py-2 text-gray-100">
+            </div>
+            <div>
+              <label class="block text-gray-400 mb-1">仿写新短剧标题</label>
+              <input v-model="refForm.title" type="text" placeholder="例如：龙王殿：退婚日百亿聘礼" class="w-full bg-brand-dark border border-brand-border rounded-lg px-3 py-2 text-gray-100">
+            </div>
+          </div>
+          <div>
+            <label class="block text-gray-400 mb-1">待套用该爆款切镜节奏的新小说/剧本正文</label>
+            <textarea v-model="refForm.novel_text" rows="4" placeholder="粘贴您的网文小说章节或故事梗概，系统将严格按照参考视频的每镜秒数、切镜频率与前3秒钩子结构进行 1:1 节奏换皮..." class="w-full bg-brand-dark border border-brand-border rounded-lg p-3 text-gray-100"></textarea>
+          </div>
+          <div v-if="refResult" class="p-4 rounded-xl bg-brand-dark border border-rose-500/30 space-y-2">
+            <div class="flex items-center justify-between">
+              <span class="font-bold text-rose-300">📊 拆解报告 ({{ refResult.source }})</span>
+              <span class="px-2 py-0.5 rounded bg-rose-950 text-rose-300 border border-rose-700">
+                节奏画像: {{ refResult.pacing_profile }} · {{ refResult.cuts_per_minute }} 切/分钟
+              </span>
+            </div>
+            <div class="text-gray-300 text-[11px]">
+              <strong>叙事弧线：</strong>{{ refResult.narrative_arc }}
+            </div>
+            <div class="text-amber-300 text-[11px]" v-if="refResult.hook_mechanics">
+              <strong>🔥 黄金3秒钩子机制：</strong>首镜 {{ refResult.hook_mechanics.first_shot_duration }}s · {{ refResult.hook_mechanics.retention_trigger }}
+            </div>
+            <div class="flex flex-wrap gap-1.5 pt-1">
+              <span v-for="s in refResult.shots" :key="s.shot_id" class="px-2 py-0.5 rounded bg-brand-card border border-gray-700 text-[10px] text-gray-300">
+                #{{ s.shot_id }} ({{ s.duration_seconds }}s · {{ s.suggested_motion }})
+              </span>
+            </div>
+          </div>
+        </div>
+        <div class="px-6 py-3.5 border-t border-brand-border bg-brand-dark flex justify-end space-x-3">
+          <button @click="showRefModal = false" class="px-4 py-1.5 rounded-lg text-gray-400">关闭</button>
+          <button @click="runReferenceAnalysis" :disabled="isAnalyzingRef" class="px-5 py-1.5 rounded-lg bg-gradient-to-r from-rose-500 to-orange-500 text-black font-bold shadow disabled:opacity-50">
+            {{ isAnalyzingRef ? '正在逆向拆解与仿写...' : '🎯 立即拆解并 1:1 仿写分镜' }}
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 导演质检门禁与算力账单弹窗 (Backlot Quality Gate & Cost Tracker Modal) -->
+    <div v-if="showQualityModal" class="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+      <div class="w-full max-w-3xl bg-brand-card border border-cyan-500/40 rounded-2xl shadow-2xl overflow-hidden text-xs">
+        <div class="px-6 py-4 border-b border-brand-border flex items-center justify-between bg-brand-dark">
+          <div>
+            <h3 class="font-bold text-sm text-brand-cyan">🛡️ 导演反“PPT幻灯片感”6维质检与算力账单 (OpenMontage Backlot)</h3>
+            <p class="text-[11px] text-gray-400 mt-0.5">自动检测单镜超时、同运镜连发、黄金3秒钩子拖沓，并统计预估与实消耗云端算力账单</p>
+          </div>
+          <button @click="showQualityModal = false" class="text-gray-400 hover:text-white"><i class="fa-solid fa-xmark text-lg"></i></button>
+        </div>
+        <div class="p-6 space-y-4 max-h-[75vh] overflow-y-auto" v-if="qualityData">
+          <div class="grid grid-cols-3 gap-3">
+            <div class="p-3.5 rounded-xl bg-brand-dark border border-brand-border">
+              <div class="text-gray-400 text-[11px]">反 PPT 幻灯片感风险分</div>
+              <div class="text-xl font-bold mt-1" :class="qualityData.after_quality.risk_score <= 25 ? 'text-emerald-400' : 'text-amber-400'">
+                {{ qualityData.after_quality.risk_score }} / 100
+                <span class="text-xs font-normal text-gray-400 ml-1">(优化前: {{ qualityData.before_quality.risk_score }})</span>
+              </div>
+              <div class="text-[10px] text-emerald-300 mt-1">{{ qualityData.after_quality.verdict }}</div>
+            </div>
+            <div class="p-3.5 rounded-xl bg-brand-dark border border-brand-border">
+              <div class="text-gray-400 text-[11px]">镜头运动覆盖率 & 平均镜长</div>
+              <div class="text-xl font-bold text-brand-cyan mt-1">
+                {{ Math.round((qualityData.after_quality.metrics.motion_diversity_ratio || 1) * 100) }}% · {{ qualityData.after_quality.metrics.avg_duration_sec }}s
+              </div>
+              <div class="text-[10px] text-gray-400 mt-1">首镜钩子: {{ qualityData.after_quality.metrics.first_shot_duration_sec }}s (标准 ≤3.5s)</div>
+            </div>
+            <div class="p-3.5 rounded-xl bg-brand-dark border border-brand-border">
+              <div class="text-gray-400 text-[11px]">本集算力成本预估 (CostTracker)</div>
+              <div class="text-xl font-bold text-amber-300 mt-1">
+                ¥{{ qualityData.cost_estimate.estimated_total_cny }}
+                <span class="text-xs font-normal text-gray-400">(${{ qualityData.cost_estimate.estimated_total_usd }})</span>
+              </div>
+              <div class="text-[10px] text-gray-400 mt-1">预算上限: ${{ qualityData.cost_estimate.budget_limit_usd }} (防超支熔断已开启)</div>
+            </div>
+          </div>
+
+          <div v-if="qualityData.before_quality.issues && qualityData.before_quality.issues.length > 0" class="p-3.5 rounded-xl bg-amber-950/20 border border-amber-700/40 space-y-1.5">
+            <div class="font-bold text-amber-300">⚡ 自动调优器已修复的分镜节奏隐患：</div>
+            <div v-for="(iss, idx) in qualityData.before_quality.issues" :key="idx" class="text-[11px] text-gray-300">
+              • [{{ iss.dimension }}] {{ iss.detail }}
+            </div>
+          </div>
+
+          <div v-if="qualityData.decisions && qualityData.decisions.length > 0" class="p-3.5 rounded-xl bg-brand-dark border border-brand-border space-y-1.5">
+            <div class="font-bold text-cyan-300">📜 导演决策审计流 (decisions.jsonl 最近记录)</div>
+            <div v-for="(d, idx) in qualityData.decisions" :key="idx" class="text-[11px] text-gray-400 font-mono">
+              [{{ d.stage }}] {{ d.action }} → {{ d.reason }}
+            </div>
+          </div>
+        </div>
+        <div class="px-6 py-3.5 border-t border-brand-border bg-brand-dark flex justify-end space-x-3">
+          <button @click="showQualityModal = false" class="px-4 py-1.5 rounded-lg text-gray-400">关闭</button>
+          <button @click="runQualityCheck(true)" :disabled="isCheckingQuality" class="px-5 py-1.5 rounded-lg bg-gradient-to-r from-cyan-500 to-blue-600 text-black font-bold shadow disabled:opacity-50">
+            {{ isCheckingQuality ? '正在诊断调优...' : '⚡ 一键执行反 PPT 节奏调优' }}
+          </button>
+        </div>
+      </div>
+    </div>
+
     <!-- 成功通知 Toast -->
     <div v-if="toast.show" class="fixed bottom-6 right-6 z-50 p-4 rounded-xl bg-brand-card border border-brand-cyan/60 shadow-2xl text-xs flex items-center space-x-3 text-gray-100 max-w-md animate-bounce">
       <i class="fa-solid fa-circle-check text-brand-cyan text-base"></i>
@@ -677,13 +930,15 @@
       setup() {
         const currentLang = ref('zh');
         const t = (key) => (i18n[currentLang.value] && i18n[currentLang.value][key]) || key;
+        const cacheBust = ref(Date.now());
 
         const project = ref({
-          title: "至尊龙王归位",
-          genre: "都市战神爽文",
-          duration: 61.61,
-          video_url: "/output/至尊龙王归位/至尊龙王归位_影视级成片.mp4",
-          srt_url: "/output/至尊龙王归位/至尊龙王归位.srt",
+          title: "",
+          genre: "",
+          duration: 0,
+          video_url: "",
+          live_actor_video: "",
+          srt_url: "",
           characters: [],
           shots: [],
           audio_tracks: []
@@ -702,6 +957,18 @@
         const showSplitInput = ref(false);
         const novelText = ref('');
         const newEpisodeTitle = ref('');
+
+        // AI 编剧与番茄热榜状态
+        const showScriptModal = ref(false);
+        const isFetchingRank = ref(false);
+        const isGeneratingScript = ref(false);
+        const fanqieBooks = ref([]);
+        const scriptForm = ref({ title: '', genre: '都市爽文', novel_text: '' });
+
+        // 5阶段合成与单镜编辑状态
+        const renderState = ref({ is_rendering: false, progress: 0, current_step: '就绪' });
+        const editingShot = ref(null);
+        const isSavingShot = ref(false);
 
         const activeVideoMode = ref('full');
         const selectedShot = ref({});
@@ -726,11 +993,135 @@
             const res = await fetch('/api/project');
             const data = await res.json();
             project.value = data;
+            cacheBust.value = Date.now();
             if (data.shots && data.shots.length > 0) {
               selectedShot.value = data.shots[0];
             }
           } catch (e) {
             console.error('Failed to load project', e);
+          }
+        };
+
+        const openScriptModal = () => {
+          showScriptModal.value = true;
+          if (fanqieBooks.value.length === 0) {
+            fetchFanqieRank();
+          }
+        };
+
+        const fetchFanqieRank = async () => {
+          isFetchingRank.value = true;
+          try {
+            const res = await fetch('/api/fanqie/rank?limit=8');
+            const data = await res.json();
+            if (data.books) fanqieBooks.value = data.books;
+          } catch (e) {
+            showNotice('提示', '获取番茄小说热榜失败');
+          } finally {
+            isFetchingRank.value = false;
+          }
+        };
+
+        const selectFanqieBook = async (b) => {
+          scriptForm.value.title = b.title;
+          scriptForm.value.genre = b.category || '热门网文';
+          scriptForm.value.novel_text = b.abstract || '';
+          try {
+            const res = await fetch('/api/fanqie/import', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ url_or_id: b.book_id })
+            });
+            const data = await res.json();
+            if (data.book && data.book.content) {
+              scriptForm.value.novel_text = data.book.content;
+            }
+          } catch (e) {}
+        };
+
+        const generateNewScript = async () => {
+          if (!scriptForm.value.title.trim() || !scriptForm.value.novel_text.trim()) {
+            showNotice('提示', '请填写剧名与小说内容');
+            return;
+          }
+          isGeneratingScript.value = true;
+          try {
+            const res = await fetch('/api/project/generate', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(scriptForm.value)
+            });
+            const data = await res.json();
+            project.value = data;
+            cacheBust.value = Date.now();
+            showScriptModal.value = false;
+            showNotice('剧本拆解成功', `已生成《${data.title}》共 ${data.shots.length} 个分镜！`);
+          } catch (e) {
+            showNotice('拆解失败', '请检查后端服务状态');
+          } finally {
+            isGeneratingScript.value = false;
+          }
+        };
+
+        const triggerRenderPipeline = async () => {
+          try {
+            await fetch('/api/project/render', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ title: project.value.title, genre: project.value.genre })
+            });
+            renderState.value.is_rendering = true;
+            showNotice('启动合成', '5阶段全自动影视制片流水线已启动！');
+            const timer = setInterval(async () => {
+              try {
+                const r = await fetch('/api/project/render-status');
+                const st = await r.json();
+                renderState.value = st;
+                if (!st.is_rendering) {
+                  clearInterval(timer);
+                  await fetchProject();
+                  showNotice('成片已就绪', st.current_step);
+                }
+              } catch (err) {
+                clearInterval(timer);
+              }
+            }, 2000);
+          } catch (e) {
+            showNotice('启动失败', '无法启动渲染流水线');
+          }
+        };
+
+        const openShotEditor = (shot) => {
+          editingShot.value = {
+            id: shot.id,
+            speaker: shot.speaker,
+            dialogue: shot.dialogue,
+            visual_prompt: shot.visual_prompt || '',
+            motion: shot.motion || 'ZOOM_IN',
+            regenerate_image: false,
+            regenerate_audio: true
+          };
+        };
+
+        const saveShotEdit = async () => {
+          if (!editingShot.value) return;
+          isSavingShot.value = true;
+          try {
+            const sid = editingShot.value.id;
+            const res = await fetch(`/api/shots/${sid}`, {
+              method: 'PUT',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(editingShot.value)
+            });
+            const data = await res.json();
+            project.value = data;
+            cacheBust.value = Date.now();
+            editingShot.value = null;
+            showNotice('分镜已更新', `第 #${sid} 镜精修完毕！`);
+          } catch (e) {
+            showNotice('更新失败', '修改分镜出错');
+          } finally {
+            isSavingShot.value = false;
           }
         };
 
@@ -749,10 +1140,23 @@
           }
         };
 
-        const switchEpisode = (ep) => {
+        const switchEpisode = async (ep) => {
           currentEpisode.value = ep;
-          showNotice('切换剧集', `已进入 ${ep.title}`);
           showEpisodeModal.value = false;
+          if (ep.story_text && ep.story_text.trim()) {
+            const res = await fetch('/api/project/generate', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                title: ep.title,
+                genre: activeSeries.value.genre || '都市爽文',
+                novel_text: ep.story_text
+              })
+            });
+            project.value = await res.json();
+            cacheBust.value = Date.now();
+          }
+          showNotice('切换剧集', `已进入 ${ep.title}`);
         };
 
         const addNewEpisode = async () => {
@@ -832,6 +1236,79 @@
           }
         };
 
+        // OpenMontage 爆款视频拆解与导演质检门禁状态
+        const showRefModal = ref(false);
+        const isAnalyzingRef = ref(false);
+        const refForm = ref({
+          video_source: '',
+          title: '龙王殿：退婚日百亿聘礼',
+          novel_text: '林家寿宴之上，未婚妻当众甩出一纸退婚书嘲讽叶辰只是个送外卖的废物。下一秒，门外百架武装直升机轰鸣降落，全球首富跪地高呼恭迎至尊龙王归位！'
+        });
+        const refResult = ref(null);
+
+        const showQualityModal = ref(false);
+        const isCheckingQuality = ref(false);
+        const qualityData = ref(null);
+
+        const runReferenceAnalysis = async () => {
+          isAnalyzingRef.value = true;
+          try {
+            const res = await fetch('/api/project/analyze-reference', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                video_source: refForm.value.video_source,
+                title: refForm.value.title,
+                novel_text: refForm.value.novel_text,
+                adapt_and_save: true
+              })
+            });
+            const data = await res.json();
+            refResult.value = data.reference_breakdown;
+            if (data.adapted_storyboard) {
+              project.value = data.adapted_storyboard;
+              cacheBust.value = Date.now();
+              if (data.adapted_storyboard.shots && data.adapted_storyboard.shots.length > 0) {
+                selectedShot.value = data.adapted_storyboard.shots[0];
+              }
+              showNotice('1:1 节奏仿写完成', `已按爆款视频节奏 (${data.reference_breakdown.cuts_per_minute}切/分) 生成《${data.adapted_storyboard.title}》！`);
+            }
+          } catch (e) {
+            showNotice('拆解失败', '请检查视频路径或后端日志');
+          } finally {
+            isAnalyzingRef.value = false;
+          }
+        };
+
+        const runQualityCheck = async (autoFix = true) => {
+          isCheckingQuality.value = true;
+          try {
+            const res = await fetch('/api/project/quality-check', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ auto_fix: autoFix, budget_limit_usd: 2.0 })
+            });
+            const data = await res.json();
+            qualityData.value = data;
+            if (data.project) {
+              project.value = data.project;
+              cacheBust.value = Date.now();
+            }
+            if (autoFix) {
+              showNotice('导演质检通过', `反PPT风险分: ${data.after_quality.risk_score}/100 · ${data.after_quality.verdict}`);
+            }
+          } catch (e) {
+            showNotice('质检失败', '无法执行导演质检');
+          } finally {
+            isCheckingQuality.value = false;
+          }
+        };
+
+        const openQualityModal = async () => {
+          showQualityModal.value = true;
+          await runQualityCheck(true);
+        };
+
         onMounted(() => {
           fetchProject();
           fetchSeries();
@@ -841,6 +1318,7 @@
         return {
           currentLang,
           t,
+          cacheBust,
           project,
           activeSeries,
           currentEpisode,
@@ -848,6 +1326,21 @@
           showSplitInput,
           novelText,
           newEpisodeTitle,
+          showScriptModal,
+          isFetchingRank,
+          isGeneratingScript,
+          fanqieBooks,
+          scriptForm,
+          openScriptModal,
+          fetchFanqieRank,
+          selectFanqieBook,
+          generateNewScript,
+          renderState,
+          triggerRenderPipeline,
+          editingShot,
+          isSavingShot,
+          openShotEditor,
+          saveShotEdit,
           switchEpisode,
           addNewEpisode,
           autoSplitNovel,
@@ -859,7 +1352,17 @@
           keyInputs,
           toast,
           saveKeys,
-          exportToJianying
+          exportToJianying,
+          showRefModal,
+          isAnalyzingRef,
+          refForm,
+          refResult,
+          runReferenceAnalysis,
+          showQualityModal,
+          isCheckingQuality,
+          qualityData,
+          openQualityModal,
+          runQualityCheck
         };
       }
     }).mount('#app');

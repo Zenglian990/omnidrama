@@ -84,32 +84,62 @@ class AudioMixer:
         return library
 
     def generate_bgm_track(self, bgm_type: str, duration: float, output_path: str) -> str:
-        """根据剧情阶段生成影视原声配乐 (悬疑低频暗涌 vs 绝地战神高燃节奏)."""
+        """根据剧情阶段生成影视原声配乐 (支持读取 assets/bgm 真实配乐，或合成电影感弦乐和声+心跳律动)."""
         os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
 
+        # 优先检查 assets/bgm 目录下是否有真实 MP3/WAV 配乐素材
+        existing_bgm = list(self.bgm_dir.glob(f"{bgm_type}.*")) or list(self.bgm_dir.glob("*.mp3"))
+        if existing_bgm:
+            src_bgm = str(existing_bgm[0])
+            cmd = [
+                "ffmpeg", "-y",
+                "-stream_loop", "-1",
+                "-i", src_bgm,
+                "-af", f"afade=t=in:ss=0:d=1.5,afade=t=out:st={max(0.5, duration - 2.0):.2f}:d=2.0,volume=0.32",
+                "-t", f"{duration:.3f}",
+                "-ar", "44100", "-ac", "2",
+                "-c:a", "pcm_s16le",
+                output_path
+            ]
+            res = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            if res.returncode == 0 and os.path.exists(output_path):
+                return output_path
+
+        # 使用 aevalsrc 合成柔和的 A小调/D小调电影大提琴和声铺底 + 史诗定音鼓律动 (消除刺耳单频正弦波)
         if bgm_type == "epic_battle":
-            cmd = [
-                "ffmpeg", "-y",
-                "-f", "lavfi", "-i", f"sine=f=55:d={duration}",
-                "-f", "lavfi", "-i", f"sine=f=110:d={duration}",
-                "-f", "lavfi", "-i", f"sine=f=165:d={duration}",
-                "-f", "lavfi", "-i", "anoisesrc=c=brown:a=0.06,lowpass=f=240",
-                "-filter_complex", "[0:a][1:a][2:a][3:a]amix=inputs=4:duration=first,volume=0.45",
-                "-t", f"{duration:.3f}",
-                "-c:a", "pcm_s16le",
-                output_path
-            ]
+            expr = (
+                "0.12*sin(2*PI*110*t)*(0.6+0.4*sin(2*PI*0.5*t))"
+                "+0.09*sin(2*PI*164.81*t)*(0.7+0.3*cos(2*PI*0.25*t))"
+                "+0.07*sin(2*PI*220*t)*(0.5+0.5*sin(2*PI*0.33*t))"
+                "+0.05*sin(2*PI*130.81*t)"
+                "+0.14*sin(2*PI*65*t)*exp(-4*mod(t,1.5))"
+            )
+            af_chain = (
+                f"lowpass=f=680,aecho=0.8:0.88:60:0.35,"
+                f"afade=t=in:ss=0:d=1.2,afade=t=out:st={max(0.5, duration - 1.8):.2f}:d=1.8,volume=0.38"
+            )
         else:
-            cmd = [
-                "ffmpeg", "-y",
-                "-f", "lavfi", "-i", f"sine=f=50:d={duration}",
-                "-f", "lavfi", "-i", f"sine=f=100:d={duration}",
-                "-f", "lavfi", "-i", "anoisesrc=c=brown:a=0.04,lowpass=f=200",
-                "-filter_complex", "[0:a][1:a][2:a]amix=inputs=3:duration=first,volume=0.35",
-                "-t", f"{duration:.3f}",
-                "-c:a", "pcm_s16le",
-                output_path
-            ]
+            expr = (
+                "0.10*sin(2*PI*98*t)*(0.6+0.4*sin(2*PI*0.25*t))"
+                "+0.08*sin(2*PI*146.83*t)*(0.6+0.4*cos(2*PI*0.2*t))"
+                "+0.06*sin(2*PI*196*t)"
+                "+0.10*sin(2*PI*55*t)*exp(-3.5*mod(t,2.0))"
+            )
+            af_chain = (
+                f"lowpass=f=520,aecho=0.8:0.85:90:0.3,"
+                f"afade=t=in:ss=0:d=1.2,afade=t=out:st={max(0.5, duration - 1.8):.2f}:d=1.8,volume=0.30"
+            )
+
+        cmd = [
+            "ffmpeg", "-y",
+            "-f", "lavfi",
+            "-i", f"aevalsrc='{expr}':s=44100:d={duration:.3f}",
+            "-af", af_chain,
+            "-t", f"{duration:.3f}",
+            "-ar", "44100", "-ac", "2",
+            "-c:a", "pcm_s16le",
+            output_path
+        ]
         subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
         return output_path
 
@@ -121,7 +151,7 @@ class AudioMixer:
         bgm_type: str = "epic_battle",
         output_path: str = "final_master.wav"
     ) -> str:
-        """三轨融合混音：自动对齐时间线，将台词、拟音和配乐融合成母带音轨."""
+        """三轨融合混音：自动对齐时间线，含人声对白自动避让 (Sidechain Ducking)，将台词、拟音和配乐融合成母带音轨."""
         os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
         sfx_lib = self.ensure_sfx_library()
 
@@ -131,8 +161,12 @@ class AudioMixer:
 
         # 构造 FFmpeg 多输入与复杂滤镜
         inputs = ["-i", voice_track, "-i", bgm_file]
-        filter_complex = []
-        mix_inputs = ["[0:a]", "[1:a]"]
+        filter_complex = [
+            "[0:a]aresample=44100,pan=stereo|c0=c0|c1=c0,asplit=2[voice_main][voice_sc]",
+            "[1:a]aresample=44100,pan=stereo|c0=c0|c1=c1[bgm_raw]",
+            "[bgm_raw][voice_sc]sidechaincompress=threshold=0.03:ratio=5:attack=40:release=400[bgm_ducked]"
+        ]
+        mix_inputs = ["[voice_main]", "[bgm_ducked]"]
 
         # 处理各音效点 (SFX Cues)
         input_idx = 2
@@ -140,19 +174,19 @@ class AudioMixer:
             sfx_name = cue.get("name", "thunder")
             sfx_path = sfx_lib.get(sfx_name, sfx_lib["thunder"])
             delay_ms = int(cue.get("time_seconds", 0.0) * 1000)
-            vol = cue.get("volume", 0.8)
+            vol = min(0.45, float(cue.get("volume", 0.45)))
 
             inputs.extend(["-i", sfx_path])
             filter_complex.append(
-                f"[{input_idx}:a]adelay={delay_ms}|{delay_ms},volume={vol}[sfx_{input_idx}]"
+                f"[{input_idx}:a]aresample=44100,adelay={delay_ms}|{delay_ms},volume={vol}[sfx_{input_idx}]"
             )
             mix_inputs.append(f"[sfx_{input_idx}]")
             input_idx += 1
 
-        # 混音合并所有音轨，并做动态压限与标准化
+        # 混音合并所有音轨，确保人声清晰突出
         mix_str = "".join(mix_inputs)
         filter_complex.append(
-            f"{mix_str}amix=inputs={len(mix_inputs)}:duration=first:dropout_transition=2,volume=1.3[aout]"
+            f"{mix_str}amix=inputs={len(mix_inputs)}:duration=first:dropout_transition=2:normalize=0,alimiter=limit=0.95[aout]"
         )
 
         cmd = [
@@ -161,6 +195,7 @@ class AudioMixer:
             "-filter_complex", ";".join(filter_complex),
             "-map", "[aout]",
             "-t", f"{total_duration:.3f}",
+            "-ar", "44100", "-ac", "2",
             "-c:a", "pcm_s16le",
             output_path
         ]

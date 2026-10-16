@@ -20,9 +20,10 @@ class SiliconFlowProvider:
         prompt: str,
         output_path: str,
         model: str = "black-forest-labs/FLUX.1-schnell",
-        image_size: str = "768x1024"
+        image_size: str = "768x1024",
+        seed: Optional[int] = None
     ) -> str:
-        """调用硅基流动 FLUX.1-schnell (或 Kolors) 实时生成 9:16 竖屏分镜原画."""
+        """调用硅基流动 FLUX.1-schnell (或 Kolors) 实时生成 9:16 竖屏分镜原画 (支持固定 seed 锁定画风与人物特征)."""
         if not self.api_key:
             raise ValueError("SILICONFLOW_API_KEY 未配置")
 
@@ -42,6 +43,8 @@ class SiliconFlowProvider:
                 "image_size": image_size,
                 "num_inference_steps": 20 if "Kolors" in m else 4
             }
+            if seed is not None:
+                payload["seed"] = abs(int(seed)) % 2147483647
             try:
                 resp = requests.post(url, headers=headers, json=payload, timeout=45)
                 if resp.status_code != 200:
@@ -72,6 +75,52 @@ class SiliconFlowProvider:
                 last_err = str(e)
 
         raise RuntimeError(f"SiliconFlow 生图失败: {last_err}")
+
+    @staticmethod
+    def resolve_cosyvoice(speaker: str) -> str:
+        """根据角色名/性别自动匹配 CosyVoice2-0.5B 男女与年龄段音色."""
+        spk = (speaker or "旁白").strip()
+        if any(w in spk for w in ["女", "母", "柳", "妻", "姐", "妹", "妈", "雪", "妃", "婉", "瑶", "晴", "涵", "小姐"]):
+            if any(w in spk for w in ["母", "妈", "太", "婆"]):
+                return "FunAudioLLM/CosyVoice2-0.5B:claire"
+            return "FunAudioLLM/CosyVoice2-0.5B:anna"
+        if any(w in spk for w in ["老", "爷", "宗主", "师父", "长者", "太上", "家主"]):
+            return "FunAudioLLM/CosyVoice2-0.5B:charles"
+        if any(w in spk for w in ["赵", "少", "反派", "恶", "霸", "公子"]):
+            return "FunAudioLLM/CosyVoice2-0.5B:david"
+        if spk == "旁白":
+            return "FunAudioLLM/CosyVoice2-0.5B:benjamin"
+        return "FunAudioLLM/CosyVoice2-0.5B:alex"
+
+    def synthesize_speech(
+        self,
+        text: str,
+        speaker: str,
+        output_path: str
+    ) -> str:
+        """调用硅基流动 CosyVoice2-0.5B 合成多角色情感语音 MP3."""
+        if not self.api_key:
+            raise ValueError("SILICONFLOW_API_KEY 未配置")
+
+        url = f"{self.base_url}/audio/speech"
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json"
+        }
+        payload = {
+            "model": "FunAudioLLM/CosyVoice2-0.5B",
+            "input": text,
+            "voice": self.resolve_cosyvoice(speaker),
+            "response_format": "mp3"
+        }
+        resp = requests.post(url, headers=headers, json=payload, timeout=35)
+        resp.raise_for_status()
+        if len(resp.content) < 200:
+            raise RuntimeError("SiliconFlow TTS returned empty audio")
+        os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
+        with open(output_path, "wb") as f:
+            f.write(resp.content)
+        return output_path
 
     def chat_completion(self, system_prompt: str, user_prompt: str) -> tuple[str, str]:
         """调用硅基流动 LLM 接口（优先 DeepSeek-V3，若余额不足自动无缝降级至免费的 Qwen2.5-7B-Instruct）."""

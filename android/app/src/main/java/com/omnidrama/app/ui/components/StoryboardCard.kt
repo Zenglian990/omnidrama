@@ -52,13 +52,16 @@ fun StoryboardCard(
     var isPlayingAudio by remember { mutableStateOf(false) }
     var shotBitmap by remember { mutableStateOf<ImageBitmap?>(null) }
 
-    LaunchedEffect(projectTitle, shot.id, shot.dialogue, shot.visual_prompt, serverUrl, refreshVersion) {
+    LaunchedEffect(projectTitle, shot.id, shot.speaker, shot.dialogue, shot.visual_prompt, shot.motion, serverUrl, refreshVersion) {
         LocalAndroidEngine.ensureTtsInitialized(context)
         withContext(Dispatchers.IO) {
             try {
-                // 1. 先检查手机本地是否已生成该分镜的预览图
-                val localFile = LocalAndroidEngine.getLocalShotImageFile(context, projectTitle, shot.id)
-                if (localFile.exists() && localFile.length() > 100 && refreshVersion == 0) {
+                val effectiveTitle = projectTitle.ifBlank { "我的短剧" }
+                val effectiveGenre = projectGenre.ifBlank { "热门爽剧" }
+
+                // 1. 先检查手机本地是否已生成该分镜的最新预览图
+                val localFile = LocalAndroidEngine.getLocalShotImageFile(context, effectiveTitle, shot.id)
+                if (localFile.exists() && localFile.length() > 100) {
                     val bmp = BitmapFactory.decodeFile(localFile.absolutePath)
                     if (bmp != null) {
                         shotBitmap = bmp.asImageBitmap()
@@ -66,11 +69,11 @@ fun StoryboardCard(
                     }
                 }
 
-                // 2. 尝试从远端机房加载
+                // 2. 尝试从远端机房加载并缓存到本地
                 var loadedFromServer = false
                 if (serverUrl.isNotBlank()) {
                     try {
-                        val imgUrl = "$serverUrl/api/shots/${shot.id}/image?v=$refreshVersion&t=${shot.dialogue.hashCode()}"
+                        val imgUrl = "${serverUrl.trimEnd('/')}/api/shots/${shot.id}/image?v=$refreshVersion&t=${shot.dialogue.hashCode()}"
                         val req = Request.Builder().url(imgUrl).build()
                         LocalAndroidEngine.directHttpClient.newBuilder()
                             .connectTimeout(3, java.util.concurrent.TimeUnit.SECONDS)
@@ -82,6 +85,10 @@ fun StoryboardCard(
                                     if (bytes != null && bytes.isNotEmpty()) {
                                         val bmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
                                         if (bmp != null) {
+                                            try {
+                                                localFile.writeBytes(bytes)
+                                            } catch (_: Exception) {
+                                            }
                                             shotBitmap = bmp.asImageBitmap()
                                             loadedFromServer = true
                                         }
@@ -96,8 +103,8 @@ fun StoryboardCard(
                 if (!loadedFromServer) {
                     val generated = LocalAndroidEngine.generateShotImageOnPhone(
                         context = context,
-                        title = projectTitle.ifBlank { "我的短剧" },
-                        genre = projectGenre.ifBlank { "热门爽剧" },
+                        title = effectiveTitle,
+                        genre = effectiveGenre,
                         shot = shot
                     )
                     if (generated.exists()) {

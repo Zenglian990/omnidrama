@@ -8,9 +8,14 @@ import json
 from typing import Optional, List, Dict
 import requests
 
-from omnidrama.schemas.drama_schema import (
-    DramaProject, CharacterAsset, Shot, ShotScaleEnum, CameraMotionEnum
-)
+try:
+    from omnidrama.schemas.drama_schema import (
+        DramaProject, CharacterAsset, Shot, ShotScaleEnum, CameraMotionEnum
+    )
+except ImportError:
+    from schemas.drama_schema import (
+        DramaProject, CharacterAsset, Shot, ShotScaleEnum, CameraMotionEnum
+    )
 
 DIRECTOR_SYSTEM_PROMPT = """你是一名资深短剧/漫剧总导演。你的任务是将用户提供的小说或故事文本拆解为工业级分镜剧本。
 请严格输出合法的 JSON 对象（不要使用 markdown 代码块包裹，直接输出 JSON），结构必须完全匹配以下格式：
@@ -52,12 +57,42 @@ class DirectorAgent:
         self.api_key = api_key
         self.last_used_engine = "未执行"
 
+    SPEAKER_STOPWORDS = {
+        "旁白", "众人", "有人", "此言", "这时", "忽然", "突然", "顿时", "刹那", "立刻",
+        "冷冷", "冷冷地", "不由", "不由得", "缓缓", "缓缓地", "猛地", "狠狠", "愤怒",
+        "淡淡", "淡淡地", "哈哈", "咬牙", "转身", "抬头", "低头", "只见", "却见",
+        "此时", "随即", "紧接着", "下一秒", "他", "她", "它", "我", "你", "这", "那"
+    }
+
     def _clean_speaker(self, raw_speaker: str) -> str:
         name = raw_speaker.strip()
-        for v in ACTION_VERBS:
-            if name.endswith(v) and len(name) > len(v):
-                name = name[:-len(v)].strip()
-                break
+        # 按长度降序剥离复合动作/说话词缀，避免“萧玄冷笑道”残留“萧玄冷”
+        speech_suffixes = sorted(
+            list(ACTION_VERBS) + [
+                "冷笑道", "怒喝道", "颤声道", "冷声道", "沉声道", "低声道", "大声道", "厉声道",
+                "冷笑一声", "冷哼一声", "怒吼道", "咆哮道", "哭喊道", "质问道", "反问道",
+                "冷笑", "怒喝", "怒吼", "颤声", "冷哼", "喝道", "说道", "笑道", "怒道", "问道", "喊道",
+                "冷冷地", "缓缓地", "淡淡地", "猛地", "不由得", "狠狠地", "咬牙切齿地", "冷冷", "缓缓", "淡淡",
+            ],
+            key=len,
+            reverse=True,
+        )
+        changed = True
+        while changed:
+            changed = False
+            for suf in speech_suffixes:
+                if name.endswith(suf) and len(name) > len(suf):
+                    name = name[:-len(suf)].strip()
+                    changed = True
+                    break
+        if (
+            not name
+            or name in self.SPEAKER_STOPWORDS
+            or name in speech_suffixes
+            or len(name) > 6
+            or len(name) < 2
+        ):
+            return "旁白"
         return name
 
     def _extract_json(self, text: str) -> dict:
@@ -74,26 +109,62 @@ class DirectorAgent:
     def breakdown_story_offline(self, raw_text: str, title: str = "短剧第一集", genre: str = "都市爽文") -> DramaProject:
         """本地语法规则拆解引擎（当未配置外部 LLM Key 时兜底使用）."""
         self.last_used_engine = "本地语法规则引擎 (未配置外部 LLM Key)"
-        lines = [line.strip() for line in raw_text.strip().split("\n") if line.strip()]
+        raw_lines = [line.strip() for line in raw_text.strip().split("\n") if line.strip() and not (line.strip().startswith("【") and line.strip().endswith("】"))]
+        lines: List[str] = []
+        for rl in raw_lines:
+            if len(rl) > 35:
+                # 将长段落按句号/感叹号/问号（含闭合引号）切分为独立镜头句
+                parts = [
+                    p.strip().lstrip("”\"'』’")
+                    for p in re.split(r"(?<=[。！？!?][”\"'』’])\s*|(?<=[。！？!?])(?![”\"'』’])\s*", rl)
+                    if p.strip().lstrip("”\"'』’")
+                ]
+                lines.extend(parts)
+            else:
+                lines.append(rl)
+
+        if not lines:
+            lines = [raw_text.strip() or f"《{title}》序幕拉开，宿命对决一触即发！"]
+
         shots: List[Shot] = []
         characters_dict: Dict[str, CharacterAsset] = {}
 
         shot_id = 1
-        for line in lines:
-            if line.startswith("【") and line.endswith("】"):
-                continue
-
+        for line in lines[:12]:
             speaker = "旁白"
             dialogue = line
 
-            match = re.match(r"^([^：:\s]{1,16})[：:](.+)$", line)
+            match = re.match(r"^([^：:\s，,。]{2,10})[：:](.+)$", line)
             if match:
                 raw_spk = match.group(1).strip()
                 speaker = self._clean_speaker(raw_spk)
                 dialogue = match.group(2).strip().strip("“”\"'")
+            else:
+                # 识别带引号的对白，如：萧玄冷笑道：“……” 或 林清雪脸色苍白，猛地后退一步，颤声道：“……”
+                q_match = re.search(r"[“\"](.+?)[”\"]", line)
+                if q_match:
+                    quoted_text = q_match.group(1).strip()
+                    prefix = line[:q_match.start()]
+                    direct_spk = re.search(
+                        r"([\u4e00-\u9fa5]{2,4}?)(?:冷笑道?|怒喝道?|怒吼道?|颤声道?|低声道?|沉声道?|喝道|说道|笑道|怒道|问道|喊道|冷笑|冷哼|道|说|问)[：:，,\s]*$",
+                        prefix,
+                    )
+                    cand = "旁白"
+                    if direct_spk:
+                        cand = self._clean_speaker(direct_spk.group(1))
+                    if cand == "旁白":
+                        subj_match = re.match(
+                            r"^([\u4e00-\u9fa5]{2,3}?)(?:脸色|神色|目光|眼神|嘴角|转身|猛地|冷冷|缓缓|淡淡|不由|心中|闻言|见状|看着|望着)",
+                            line,
+                        )
+                        if subj_match:
+                            cand = self._clean_speaker(subj_match.group(1))
+                    if cand != "旁白":
+                        speaker = cand
+                        dialogue = quoted_text
 
             if speaker != "旁白" and speaker not in characters_dict:
-                is_female = any(w in speaker for w in ["女", "妹", "妻", "小姐", "姐", "母", "琴", "雪", "涵", "妃"])
+                is_female = any(w in speaker for w in ["女", "妹", "妻", "小姐", "姐", "母", "琴", "雪", "涵", "妃", "婉", "瑶"])
                 characters_dict[speaker] = CharacterAsset(
                     name=speaker,
                     gender="female" if is_female else "male",

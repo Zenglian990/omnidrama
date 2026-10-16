@@ -23,7 +23,11 @@ def test_capcut_draft_export(tmp_path):
 
     with open(content_file, "r", encoding="utf-8") as f:
         data = json.load(f)
-        assert data["version"] == "1.0.0"
+        assert data["version"] in ("360000", "1.0.0")
+        assert "materials" in data
+        assert len(data["materials"]["videos"]) == 2
+        assert len(data["materials"]["audios"]) == 2
+        assert len(data["materials"]["texts"]) == 2
         assert len(data["tracks"]) == 3  # video, audio, text
         assert data["duration"] == int((3.0 + 4.5) * 1_000_000)
 

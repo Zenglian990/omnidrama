@@ -28,9 +28,10 @@ class DramaRepository {
 
     suspend fun getProject(context: Context, baseUrl: String): ProjectData = withContext(Dispatchers.IO) {
         val localCurrent = LocalAndroidEngine.getCurrentWork(context)
-        if (baseUrl.isNotBlank()) {
+        val cleanUrl = baseUrl.trim().removeSuffix("/")
+        if (cleanUrl.isNotBlank()) {
             try {
-                val req = Request.Builder().url("$baseUrl/api/project").build()
+                val req = Request.Builder().url("$cleanUrl/api/project").build()
                 client.newCall(req).execute().use { resp ->
                     if (resp.isSuccessful) {
                         val body = resp.body?.string()
@@ -51,9 +52,10 @@ class DramaRepository {
 
     suspend fun getSotaStatus(context: Context, baseUrl: String): SotaStatusResponse = withContext(Dispatchers.IO) {
         val localKeys = LocalAndroidEngine.getSavedApiKeys(context)
-        if (baseUrl.isNotBlank()) {
+        val cleanUrl = baseUrl.trim().removeSuffix("/")
+        if (cleanUrl.isNotBlank()) {
             try {
-                val req = Request.Builder().url("$baseUrl/api/sota/status").build()
+                val req = Request.Builder().url("$cleanUrl/api/sota/status").build()
                 client.newCall(req).execute().use { resp ->
                     if (resp.isSuccessful) {
                         val body = resp.body?.string()
@@ -117,12 +119,18 @@ class DramaRepository {
         regenerateImage: Boolean,
         regenerateAudio: Boolean
     ): ProjectData = withContext(Dispatchers.IO) {
+        val effectiveTitle = title.ifBlank { "我的短剧" }
+        val effectiveGenre = genre.ifBlank { "热门爽剧" }
         val mVal = motion.uppercase()
         val mName = when {
             mVal.contains("SHAKE") -> "镜头震撼"
             mVal.contains("OUT") -> "镜头拉远"
             mVal.contains("PAN") -> "向左横移"
             else -> "镜头推进"
+        }
+
+        if (regenerateAudio) {
+            LocalAndroidEngine.clearCachedShotAudio(context, shotId)
         }
 
         // 1. 先尝试远程机房更新
@@ -138,11 +146,16 @@ class DramaRepository {
                 )
                 val json = gson.toJson(payload)
                 val req = Request.Builder()
-                    .url("$baseUrl/api/shots/$shotId")
+                    .url("${baseUrl.trimEnd('/')}/api/shots/$shotId")
                     .put(json.toRequestBody("application/json".toMediaType()))
                     .build()
                 client.newCall(req).execute().use { resp ->
                     if (resp.isSuccessful) {
+                        // 删除本地旧预览缓存，以便分镜卡片从远端拉取重绘后的新图
+                        try {
+                            LocalAndroidEngine.getLocalShotImageFile(context, effectiveTitle, shotId).delete()
+                        } catch (_: Exception) {
+                        }
                         val updated = getProject(context, baseUrl)
                         if (updated.title.isNotBlank()) {
                             return@withContext updated
@@ -153,7 +166,7 @@ class DramaRepository {
             }
         }
 
-        // 2. 手机本地直接更新并重绘该镜头画面
+        // 2. 手机本地直接更新并重绘该镜头画面与字幕层
         val cur = LocalAndroidEngine.getCurrentWork(context)
         val newShots = cur.shots.map { s ->
             if (s.id == shotId) {
@@ -164,12 +177,14 @@ class DramaRepository {
                     motion = mVal,
                     motion_name = mName
                 )
-                if (regenerateImage) {
-                    val file = LocalAndroidEngine.generateShotImageOnPhone(context, title, genre, updatedShot)
-                    updatedShot.copy(image = file.absolutePath)
-                } else {
-                    updatedShot
-                }
+                val file = LocalAndroidEngine.generateShotImageOnPhone(
+                    context = context,
+                    title = effectiveTitle,
+                    genre = effectiveGenre,
+                    shot = updatedShot,
+                    forceRegenerateBg = regenerateImage
+                )
+                updatedShot.copy(image = file.absolutePath)
             } else {
                 s
             }
@@ -352,6 +367,8 @@ class DramaRepository {
 
         val providers = mapOf(
             "siliconflow" to entry("🔥 硅基流动 SiliconFlow (国内免绑卡首选)", "手机直连：免费 FLUX.1 逐镜生图 + DeepSeek/Qwen 导演拆解 + CosyVoice 配音", "SILICONFLOW_API_KEY", "国内免费生图+导演"),
+            "dashscope" to entry("🌟 阿里云百炼 DashScope (通义万相2.1 + Qwen配音)", "新用户送百万Token+百张免费生图：Wan2.1 竖屏短剧剧照 + 超拟真配音", "DASHSCOPE_API_KEY", "国内大厂顶配 (推荐)"),
+            "seedance" to entry("🎬 字节火山方舟 Seedance 2.0 (豆包视频大模型)", "50万免费Token体验：图生视频 I2V 电影级物理运镜与人物微表情", "ARK_API_KEY", "SOTA 动态视频"),
             "deepseek" to entry("DeepSeek-V3 / R1 (深度求索官方)", "手机直连：好莱坞编剧与分镜剧本拆解总导演", "DEEPSEEK_API_KEY", "主力导演 (国内直连)"),
             "pexels" to entry("Pexels 免费高清视频/图片素材库", "手机直连：0元免绑卡自动匹配下载 9:16 竖屏高清实拍剧照", "PEXELS_API_KEY", "免费高清素材"),
             "kimi" to entry("Kimi (月之暗面 Moonshot AI)", "手机直连：长篇网文理解、剧本台词打磨与镜头关键词提炼", "MOONSHOT_API_KEY", "国内直连 (SOTA)"),
@@ -364,4 +381,66 @@ class DramaRepository {
             providers = providers
         )
     }
+
+    suspend fun optimizeAndAuditProject(
+        context: Context,
+        baseUrl: String,
+        project: ProjectData
+    ): ProjectData = withContext(Dispatchers.IO) {
+        if (baseUrl.isNotBlank()) {
+            try {
+                val payload = mapOf("auto_fix" to true, "budget_limit_usd" to 2.0)
+                val req = Request.Builder()
+                    .url("${baseUrl.trimEnd('/')}/api/project/quality-check")
+                    .post(gson.toJson(payload).toRequestBody("application/json".toMediaType()))
+                    .build()
+                client.newCall(req).execute().use { resp ->
+                    if (resp.isSuccessful) {
+                        val updated = getProject(context, baseUrl)
+                        if (updated.title.isNotBlank()) {
+                            return@withContext updated
+                        }
+                    }
+                }
+            } catch (_: Exception) {
+            }
+        }
+        val optimized = LocalAndroidEngine.scoreAndOptimizeStoryboardOnPhone(project)
+        LocalAndroidEngine.saveCreatorWork(context, optimized)
+        return@withContext optimized
+    }
+
+    suspend fun analyzeAndAdaptReference(
+        context: Context,
+        baseUrl: String,
+        title: String,
+        genre: String,
+        novelText: String
+    ): ProjectData = withContext(Dispatchers.IO) {
+        if (baseUrl.isNotBlank()) {
+            try {
+                val payload = mapOf(
+                    "video_source" to "",
+                    "title" to title,
+                    "novel_text" to novelText,
+                    "adapt_and_save" to true
+                )
+                val req = Request.Builder()
+                    .url("${baseUrl.trimEnd('/')}/api/project/analyze-reference")
+                    .post(gson.toJson(payload).toRequestBody("application/json".toMediaType()))
+                    .build()
+                client.newCall(req).execute().use { resp ->
+                    if (resp.isSuccessful) {
+                        val updated = getProject(context, baseUrl)
+                        if (updated.title.isNotBlank()) {
+                            return@withContext updated
+                        }
+                    }
+                }
+            } catch (_: Exception) {
+            }
+        }
+        return@withContext LocalAndroidEngine.adaptReferenceRhythmOnPhone(context, title, genre, novelText)
+    }
 }
+

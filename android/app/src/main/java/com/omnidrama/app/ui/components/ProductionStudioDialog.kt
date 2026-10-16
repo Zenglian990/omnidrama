@@ -400,8 +400,12 @@ fun ProductionStudioDialog(
                             onClick = {
                                 scope.launch {
                                     if (usingLocalEngine && renderStatus.video_url.startsWith("/")) {
-                                        val msg = LocalAndroidEngine.exportLocalMp4ToMovies(context, renderStatus.video_url, title)
-                                        Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
+                                        val savedPath = LocalAndroidEngine.exportLocalMp4ToMovies(context, renderStatus.video_url, title)
+                                        if (!savedPath.isNullOrBlank()) {
+                                            Toast.makeText(context, "✅ 成片已导出至相册 Movies:\n$savedPath", Toast.LENGTH_LONG).show()
+                                        } else {
+                                            Toast.makeText(context, "❌ 导出至相册失败，请重试", Toast.LENGTH_LONG).show()
+                                        }
                                     } else {
                                         Toast.makeText(context, "正在注入剪映草稿箱...", Toast.LENGTH_SHORT).show()
                                         val msg = repo.exportJianying(serverUrl)

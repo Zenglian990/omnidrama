@@ -38,24 +38,34 @@ import com.omnidrama.app.ui.components.*
 import com.omnidrama.app.ui.theme.*
 import kotlinx.coroutines.launch
 
+private fun isLocalVideoFile(path: String): Boolean {
+    return (path.startsWith("/") && !path.startsWith("/api/")) || path.startsWith("file://")
+}
+
 fun downloadVideoToPhone(context: Context, videoPathOrUrl: String, serverUrl: String, title: String, mode: String = "full") {
     val safeTitle = title.ifBlank { "未命名短剧" }
     if (videoPathOrUrl.isBlank()) {
         Toast.makeText(context, "⚠️ 请先点击【⚡ 一键制作 / 渲染全片】生成视频后再下载", Toast.LENGTH_LONG).show()
         return
     }
-    // 1. 如果是手机本地 MediaCodec 硬件压制的 MP4 文件，直接导出至系统相册 Movies
-    if (videoPathOrUrl.startsWith("/")) {
-        val msg = LocalAndroidEngine.exportLocalMp4ToMovies(context, videoPathOrUrl, safeTitle)
-        Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
+    // 1. 如果是手机本地 MediaCodec 硬件压制的 MP4 文件，直接通过 MediaStore 导出至系统相册 Movies
+    if (isLocalVideoFile(videoPathOrUrl)) {
+        val localCleanPath = videoPathOrUrl.removePrefix("file://")
+        val savedPath = LocalAndroidEngine.exportLocalMp4ToMovies(context, localCleanPath, safeTitle)
+        if (!savedPath.isNullOrBlank()) {
+            Toast.makeText(context, "✅ 成片已保存至系统相册 Movies:\n$savedPath", Toast.LENGTH_LONG).show()
+        } else {
+            Toast.makeText(context, "❌ 本地视频导出失败，请重新点击【合成全片】后再试", Toast.LENGTH_LONG).show()
+        }
         return
     }
     // 2. 如果是远程服务器流地址，通过 DownloadManager 下载至 Movies
     try {
+        val baseClean = serverUrl.trimEnd('/')
         val downloadUrl = if (videoPathOrUrl.startsWith("http")) {
-            "$serverUrl/api/video/download?mode=$mode&t=${System.currentTimeMillis()}"
+            "$baseClean/api/video/download?mode=$mode&t=${System.currentTimeMillis()}"
         } else {
-            "$serverUrl$videoPathOrUrl"
+            "$baseClean/${videoPathOrUrl.trimStart('/')}"
         }
         val fileName = "${safeTitle}_曾练AI短剧成片_${System.currentTimeMillis() % 10000}.mp4"
         val request = DownloadManager.Request(Uri.parse(downloadUrl))
@@ -71,7 +81,7 @@ fun downloadVideoToPhone(context: Context, videoPathOrUrl: String, serverUrl: St
         dm.enqueue(request)
         Toast.makeText(context, "📥 已开始下载《$safeTitle》成片至手机相册 (Movies)！", Toast.LENGTH_LONG).show()
     } catch (e: Exception) {
-        Toast.makeText(context, "下载启动失败: ${e.localizedMessage}", Toast.LENGTH_LONG).show()
+        Toast.makeText(context, "下载启动失败: ${e.localizedMessage ?: "未知错误"}", Toast.LENGTH_LONG).show()
     }
 }
 
@@ -81,9 +91,10 @@ fun StudioScreen() {
     val scope = rememberCoroutineScope()
     val repo = remember { DramaRepository() }
 
-    val prefs = remember { context.getSharedPreferences("omnidrama_prefs", Context.MODE_PRIVATE) }
     var serverUrl by remember {
-        mutableStateOf(prefs.getString("server_url", "https://omnidrama-zeng.loca.lt") ?: "https://omnidrama-zeng.loca.lt")
+        val saved = prefs.getString("server_url", "") ?: ""
+        val effective = if (saved.isBlank() || saved.contains("loca.lt")) "https://omnidrama-79709693345.asia-east1.run.app" else saved
+        mutableStateOf(effective)
     }
     var project by remember { mutableStateOf(ProjectData()) }
     var creatorWorks by remember { mutableStateOf<List<ProjectData>>(emptyList()) }
@@ -404,11 +415,16 @@ fun StudioScreen() {
 
                         Spacer(modifier = Modifier.height(10.dp))
 
-                        val currentVideoPath = if (activeVideoMode == "full") project.video_url else project.live_actor_video.ifBlank { project.video_url }
+                        val currentVideoPath = if (activeVideoMode == "full") {
+                            project.video_url
+                        } else {
+                            project.live_actor_video.ifBlank { project.video_url }
+                        }
                         val fullVideoUrl = when {
                             currentVideoPath.isBlank() -> ""
-                            currentVideoPath.startsWith("http") || currentVideoPath.startsWith("/") -> currentVideoPath
-                            else -> "$serverUrl$currentVideoPath"
+                            currentVideoPath.startsWith("http") -> currentVideoPath
+                            isLocalVideoFile(currentVideoPath) -> currentVideoPath
+                            else -> "${serverUrl.trimEnd('/')}/${currentVideoPath.trimStart('/')}"
                         }
 
                         VideoPlayer(
@@ -546,7 +562,7 @@ fun StudioScreen() {
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Column {
+                                Column(modifier = Modifier.weight(1f)) {
                                     Text(
                                         text = "《${project.title}》共 ${project.shots.size} 个分镜",
                                         color = BrandCyan,
@@ -554,22 +570,74 @@ fun StudioScreen() {
                                         fontWeight = FontWeight.Bold
                                     )
                                     Text(
-                                        text = "点击【🔊 试听配音】可播放真实语音，点击卡片可改词重绘",
-                                        color = TextMuted,
-                                        fontSize = 9.5.sp
+                                        text = LocalAndroidEngine.estimateProjectCostSummary(context, project.shots.size),
+                                        color = AccentEmerald,
+                                        fontSize = 9.5.sp,
+                                        fontWeight = FontWeight.SemiBold
                                     )
                                 }
 
-                                Button(
-                                    onClick = { showProductionStudioDialog = true },
-                                    colors = ButtonDefaults.buttonColors(containerColor = AccentGold),
-                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
-                                    shape = RoundedCornerShape(6.dp),
-                                    modifier = Modifier.height(28.dp)
-                                ) {
-                                    Icon(Icons.Default.PlayArrow, contentDescription = null, tint = BgDark, modifier = Modifier.size(13.dp))
-                                    Spacer(modifier = Modifier.width(3.dp))
-                                    Text("合成全片", color = BgDark, fontSize = 11.sp, fontWeight = FontWeight.Black)
+                                Row(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                                    Button(
+                                        onClick = {
+                                            scope.launch {
+                                                val storyText = project.shots.joinToString("\n") { "${it.speaker}：${it.dialogue}" }
+                                                val adapted = repo.analyzeAndAdaptReference(
+                                                    context = context,
+                                                    baseUrl = serverUrl,
+                                                    title = project.title,
+                                                    genre = project.genre,
+                                                    novelText = storyText
+                                                )
+                                                project = adapted
+                                                shotRefreshVersion += 1
+                                                Toast.makeText(
+                                                    context,
+                                                    "🎯 已按爆款短剧黄金3秒钩子节奏 (17.6切/分) 1:1 重排《${project.title}》分镜！",
+                                                    Toast.LENGTH_LONG
+                                                ).show()
+                                            }
+                                        },
+                                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF3B1D2E)),
+                                        contentPadding = PaddingValues(horizontal = 7.dp, vertical = 4.dp),
+                                        shape = RoundedCornerShape(6.dp),
+                                        modifier = Modifier.height(28.dp)
+                                    ) {
+                                        Text("🎯 爆款节奏", color = Color(0xFFFDA4AF), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                    }
+
+                                    Button(
+                                        onClick = {
+                                            scope.launch {
+                                                val optimized = repo.optimizeAndAuditProject(context, serverUrl, project)
+                                                project = optimized
+                                                shotRefreshVersion += 1
+                                                Toast.makeText(
+                                                    context,
+                                                    "🛡️ 导演反PPT质检调优完成：100%动态运镜覆盖 + 黄金3秒强钩子已锁定！",
+                                                    Toast.LENGTH_LONG
+                                                ).show()
+                                            }
+                                        },
+                                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1E293B)),
+                                        contentPadding = PaddingValues(horizontal = 7.dp, vertical = 4.dp),
+                                        shape = RoundedCornerShape(6.dp),
+                                        modifier = Modifier.height(28.dp)
+                                    ) {
+                                        Text("🛡️ 反PPT调优", color = BrandCyan, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                    }
+
+                                    Button(
+                                        onClick = { showProductionStudioDialog = true },
+                                        colors = ButtonDefaults.buttonColors(containerColor = AccentGold),
+                                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                                        shape = RoundedCornerShape(6.dp),
+                                        modifier = Modifier.height(28.dp)
+                                    ) {
+                                        Icon(Icons.Default.PlayArrow, contentDescription = null, tint = BgDark, modifier = Modifier.size(13.dp))
+                                        Spacer(modifier = Modifier.width(3.dp))
+                                        Text("合成全片", color = BgDark, fontSize = 11.sp, fontWeight = FontWeight.Black)
+                                    }
                                 }
                             }
 
@@ -579,8 +647,10 @@ fun StudioScreen() {
                                 modifier = Modifier.fillMaxSize(),
                                 verticalArrangement = Arrangement.spacedBy(10.dp)
                             ) {
-                                items(project.shots) { shot ->
+                                items(project.shots, key = { it.id }) { shot ->
                                     StoryboardCard(
+                                        projectTitle = project.title,
+                                        projectGenre = project.genre,
                                         shot = shot,
                                         serverUrl = serverUrl,
                                         isSelected = editingShot?.id == shot.id,
@@ -703,7 +773,15 @@ fun StudioScreen() {
             genre = project.genre,
             onFinished = { newUrl ->
                 selectedTab = 0
-                val updated = project.copy(video_url = newUrl, live_actor_video = newUrl)
+                val liveUrl = when {
+                    newUrl.contains("mode=full") -> newUrl.replace("mode=full", "mode=live")
+                    newUrl.endsWith("_成片.mp4") -> {
+                        val liveCandidate = newUrl.removeSuffix("_成片.mp4") + "_真人活化.mp4"
+                        if (java.io.File(liveCandidate).exists()) liveCandidate else newUrl
+                    }
+                    else -> newUrl
+                }
+                val updated = project.copy(video_url = newUrl, live_actor_video = liveUrl)
                 project = updated
                 LocalAndroidEngine.saveCreatorWork(context, updated)
                 creatorWorks = LocalAndroidEngine.getCreatorWorks(context)

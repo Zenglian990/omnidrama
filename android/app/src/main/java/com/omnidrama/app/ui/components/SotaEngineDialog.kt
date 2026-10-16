@@ -100,6 +100,26 @@ fun SotaEngineDialog(
                     modifier = Modifier.fillMaxWidth()
                 )
 
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    OutlinedButton(
+                        onClick = { serverUrl = "https://omnidrama-79709693345.asia-east1.run.app" },
+                        modifier = Modifier.weight(1.1f),
+                        contentPadding = PaddingValues(horizontal = 4.dp, vertical = 2.dp)
+                    ) {
+                        Text("填入谷歌云机房", fontSize = 10.5.sp, color = BrandCyan)
+                    }
+                    OutlinedButton(
+                        onClick = { serverUrl = "https://zenglian110110-zeng-cloud-backend.hf.space" },
+                        modifier = Modifier.weight(1f),
+                        contentPadding = PaddingValues(horizontal = 4.dp, vertical = 2.dp)
+                    ) {
+                        Text("填入HF ZeroGPU", fontSize = 10.5.sp, color = AccentEmerald)
+                    }
+                }
+
                 Spacer(modifier = Modifier.height(10.dp))
 
                 // 内置免费真实引擎提示卡
