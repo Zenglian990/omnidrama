@@ -34,6 +34,7 @@ fun ShotEditDialog(
         regenImage: Boolean,
         regenAudio: Boolean
     ) -> Unit,
+    onDeleteShot: ((shotId: Int) -> Unit)? = null,
     onDismiss: () -> Unit
 ) {
     var speaker by remember { mutableStateOf(shot.speaker) }
@@ -230,6 +231,22 @@ fun ShotEditDialog(
                             fontWeight = FontWeight.ExtraBold,
                             fontSize = 13.sp
                         )
+                    }
+                }
+
+                if (onDeleteShot != null) {
+                    Spacer(modifier = Modifier.height(10.dp))
+                    OutlinedButton(
+                        onClick = {
+                            onDeleteShot(shot.id)
+                            onDismiss()
+                        },
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFF87171)),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF7F1D1D)),
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier.fillMaxWidth().height(40.dp)
+                    ) {
+                        Text("🗑️ 删除本镜头 (自动重排分镜编号)", color = Color(0xFFF87171), fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
                     }
                 }
             }

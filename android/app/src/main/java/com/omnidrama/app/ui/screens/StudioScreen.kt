@@ -1,10 +1,14 @@
 package com.omnidrama.app.ui.screens
 
 import android.app.DownloadManager
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Context
+import android.content.Intent
 import android.net.Uri
 import android.os.Environment
 import android.widget.Toast
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -27,6 +31,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.FileProvider
 import com.omnidrama.app.data.local.LocalAndroidEngine
 import com.omnidrama.app.data.model.CharacterItem
 import com.omnidrama.app.data.model.ProjectData
@@ -37,9 +42,72 @@ import com.omnidrama.app.data.repository.DramaRepository
 import com.omnidrama.app.ui.components.*
 import com.omnidrama.app.ui.theme.*
 import kotlinx.coroutines.launch
+import java.io.File
 
 private fun isLocalVideoFile(path: String): Boolean {
     return (path.startsWith("/") && !path.startsWith("/api/")) || path.startsWith("file://")
+}
+
+fun shareVideoToApps(context: Context, videoPathOrUrl: String, title: String) {
+    if (videoPathOrUrl.isBlank()) {
+        Toast.makeText(context, "⚠️ 请先合成成片后再分享", Toast.LENGTH_SHORT).show()
+        return
+    }
+    try {
+        val safeTitle = title.ifBlank { "我的AI短剧" }
+        val shareIntent = Intent(Intent.ACTION_SEND)
+        
+        if (isLocalVideoFile(videoPathOrUrl)) {
+            val localPath = videoPathOrUrl.removePrefix("file://")
+            val file = File(localPath)
+            if (file.exists()) {
+                val uri = FileProvider.getUriForFile(
+                    context,
+                    "${context.packageName}.fileprovider",
+                    file
+                )
+                shareIntent.type = "video/mp4"
+                shareIntent.putExtra(Intent.EXTRA_STREAM, uri)
+                shareIntent.putExtra(Intent.EXTRA_SUBJECT, "《$safeTitle》AI短剧成片")
+                shareIntent.putExtra(Intent.EXTRA_TEXT, "🎬 我用曾练AI短剧创作的《$safeTitle》震撼出炉！")
+                shareIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            } else {
+                Toast.makeText(context, "成片文件不存在，请重新渲染", Toast.LENGTH_SHORT).show()
+                return
+            }
+        } else {
+            shareIntent.type = "text/plain"
+            shareIntent.putExtra(Intent.EXTRA_SUBJECT, "《$safeTitle》AI短剧")
+            shareIntent.putExtra(Intent.EXTRA_TEXT, "🎬 我用曾练AI短剧创作的《$safeTitle》震撼出炉，观看链接：$videoPathOrUrl")
+        }
+        
+        val chooser = Intent.createChooser(shareIntent, "分享短剧《$safeTitle》至抖音/快手/微信")
+        chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        context.startActivity(chooser)
+    } catch (e: Exception) {
+        Toast.makeText(context, "分享启动失败: ${e.localizedMessage ?: "未知错误"}", Toast.LENGTH_LONG).show()
+    }
+}
+
+fun generateViralCopywriting(project: ProjectData): String {
+    val title = project.title.ifBlank { "这部爆款短剧" }
+    val genre = project.genre.ifBlank { "都市逆袭爽剧" }
+    val highlightDialogue = project.shots.firstOrNull { it.dialogue.isNotBlank() }?.dialogue
+        ?: "三十年河东，三十年河西，莫欺少年穷！"
+    val speaker = project.shots.firstOrNull { it.dialogue.isNotBlank() }?.speaker ?: "主角"
+
+    return """
+🔥【2026全网疯传爆款短剧】《$title》震撼上映！
+
+💥 题材标签：#$genre #短剧 #AI短剧 #爽文改编 #热播剧 #剧情反转
+💬 炸裂名场面：
+“$speaker：$highlightDialogue”
+
+⚡ 剧情看点：
+黄金3秒高能入戏，反转连连！千万级播放爆款节奏，看一眼就停不下来！
+
+🎬 制作引擎：曾练 AI 短剧创作工作台 (OmniDrama Studio) 全流程打造！
+    """.trimIndent()
 }
 
 fun downloadVideoToPhone(context: Context, videoPathOrUrl: String, serverUrl: String, title: String, mode: String = "full") {
@@ -120,6 +188,10 @@ fun StudioScreen() {
     var isSavingShot by remember { mutableStateOf(false) }
     var shotRefreshVersion by remember { mutableIntStateOf(0) }
 
+    var pendingFanqieUrl by remember { mutableStateOf<String?>(null) }
+    var showClipboardImportDialog by remember { mutableStateOf(false) }
+    var importedUrlFromClipboard by remember { mutableStateOf("") }
+
     fun refreshData(showToast: Boolean = false) {
         scope.launch {
             isLoading = true
@@ -166,6 +238,21 @@ fun StudioScreen() {
 
     LaunchedEffect(Unit) {
         refreshData(showToast = false)
+        try {
+            val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+            if (cm != null && cm.hasPrimaryClip()) {
+                val clip = cm.primaryClip
+                if (clip != null && clip.itemCount > 0) {
+                    val clipText = clip.getItemAt(0)?.text?.toString() ?: ""
+                    val lastCheckedClip = prefs.getString("last_checked_clip", "") ?: ""
+                    if (clipText.isNotBlank() && clipText != lastCheckedClip && clipText.contains("fanqienovel.com")) {
+                        prefs.edit().putString("last_checked_clip", clipText).apply()
+                        pendingFanqieUrl = clipText.trim()
+                        showClipboardImportDialog = true
+                    }
+                }
+            }
+        } catch (_: Exception) {}
     }
 
     val hasActiveProject = project.title.isNotBlank() && project.shots.isNotEmpty()
@@ -511,6 +598,79 @@ fun StudioScreen() {
                             }
                         }
 
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Button(
+                                onClick = {
+                                    if (project.title.isBlank() && project.shots.isEmpty()) {
+                                        Toast.makeText(context, "请先选择或创建短剧作品", Toast.LENGTH_SHORT).show()
+                                        return@Button
+                                    }
+                                    val copyText = generateViralCopywriting(project)
+                                    val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                    val clip = ClipData.newPlainText("爆款推文文案", copyText)
+                                    cm.setPrimaryClip(clip)
+                                    Toast.makeText(context, "🔥 抖音/快手/小红书爆款短剧推文已复制到剪贴板！", Toast.LENGTH_SHORT).show()
+                                },
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(40.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2E1020)),
+                                border = BorderStroke(1.dp, Color(0xFFFF2D55)),
+                                shape = RoundedCornerShape(10.dp),
+                                contentPadding = PaddingValues(horizontal = 8.dp)
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(
+                                        imageVector = Icons.Default.Whatshot,
+                                        contentDescription = null,
+                                        tint = Color(0xFFFF4081),
+                                        modifier = Modifier.size(15.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text(
+                                        text = "🔥 复制爆款推文",
+                                        color = Color(0xFFFF80AB),
+                                        fontSize = 11.5.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            }
+
+                            Button(
+                                onClick = {
+                                    shareVideoToApps(context, fullVideoUrl, project.title)
+                                },
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(40.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0F2B38)),
+                                border = BorderStroke(1.dp, BrandCyan),
+                                shape = RoundedCornerShape(10.dp),
+                                contentPadding = PaddingValues(horizontal = 8.dp)
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(
+                                        imageVector = Icons.Default.Share,
+                                        contentDescription = null,
+                                        tint = BrandCyan,
+                                        modifier = Modifier.size(15.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text(
+                                        text = "📤 分享至抖音/微信",
+                                        color = BrandCyan,
+                                        fontSize = 11.5.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            }
+                        }
+
                         Spacer(modifier = Modifier.height(6.dp))
 
                         Row(
@@ -660,6 +820,44 @@ fun StudioScreen() {
                                             editingShot = shot
                                         }
                                     )
+                                }
+
+                                item {
+                                    Button(
+                                        onClick = {
+                                            val nextId = project.shots.size + 1
+                                            val newShot = ShotItem(
+                                                id = nextId,
+                                                speaker = "旁白",
+                                                scale = "特写",
+                                                motion = "ZOOM_IN",
+                                                motion_name = "镜头推进",
+                                                dialogue = "此时此刻，命运的齿轮悄然转动……",
+                                                image = "",
+                                                audio = "",
+                                                sfx = "重低音渲染",
+                                                visual_prompt = "8k cinematic vertical frame, dramatic lighting, intense short drama scene"
+                                            )
+                                            val updatedShots = project.shots + newShot
+                                            val updatedProj = project.copy(shots = updatedShots)
+                                            project = updatedProj
+                                            LocalAndroidEngine.saveCreatorWork(context, updatedProj)
+                                            creatorWorks = LocalAndroidEngine.getCreatorWorks(context)
+                                            shotRefreshVersion += 1
+                                            editingShot = newShot
+                                            Toast.makeText(context, "➕ 已添加新分镜镜头 #$nextId，可直接调整台词与画面提示词", Toast.LENGTH_SHORT).show()
+                                        },
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(vertical = 6.dp),
+                                        colors = ButtonDefaults.buttonColors(containerColor = CardDark),
+                                        border = BorderStroke(1.dp, BrandCyan.copy(alpha = 0.6f)),
+                                        shape = RoundedCornerShape(10.dp)
+                                    ) {
+                                        Icon(imageVector = Icons.Default.Add, contentDescription = null, tint = BrandCyan, modifier = Modifier.size(16.dp))
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text("➕ 插入新分镜镜头", color = BrandCyan, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                    }
                                 }
                             }
                         }
@@ -841,6 +1039,7 @@ fun StudioScreen() {
     if (showGenerateScriptDialog) {
         GenerateScriptDialog(
             serverUrl = serverUrl,
+            initialUrl = importedUrlFromClipboard,
             isGenerating = isGeneratingScript,
             onGenerate = { t, g, text ->
                 scope.launch {
@@ -848,6 +1047,7 @@ fun StudioScreen() {
                     val newProj = repo.generateScript(context, serverUrl, t, g, text)
                     isGeneratingScript = false
                     showGenerateScriptDialog = false
+                    importedUrlFromClipboard = ""
                     project = newProj
                     creatorWorks = LocalAndroidEngine.getCreatorWorks(context)
                     selectedTab = 1
@@ -860,12 +1060,61 @@ fun StudioScreen() {
                     val newProj = repo.generateScript(context, serverUrl, t, g, text)
                     isGeneratingScript = false
                     showGenerateScriptDialog = false
+                    importedUrlFromClipboard = ""
                     project = newProj
                     creatorWorks = LocalAndroidEngine.getCreatorWorks(context)
                     showProductionStudioDialog = true
                 }
             },
-            onDismiss = { showGenerateScriptDialog = false }
+            onDismiss = {
+                showGenerateScriptDialog = false
+                importedUrlFromClipboard = ""
+            }
+        )
+    }
+
+    // 📋 剪贴板自动嗅探番茄小说链接确认弹窗
+    if (showClipboardImportDialog && pendingFanqieUrl != null) {
+        AlertDialog(
+            onDismissRequest = {
+                showClipboardImportDialog = false
+                pendingFanqieUrl = null
+            },
+            title = {
+                Text("🍅 发现番茄小说链接", color = Color.White, fontWeight = FontWeight.Bold)
+            },
+            text = {
+                Text(
+                    "检测到剪贴板中含有番茄小说链接：\n\n${pendingFanqieUrl}\n\n是否立即导入并由 AI 自动拆解好莱坞竖屏短剧分镜？",
+                    color = TextSecondary,
+                    fontSize = 13.sp
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val url = pendingFanqieUrl ?: ""
+                        showClipboardImportDialog = false
+                        pendingFanqieUrl = null
+                        importedUrlFromClipboard = url
+                        showGenerateScriptDialog = true
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = AccentGold)
+                ) {
+                    Text("立即导入", color = BgDark, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = {
+                        showClipboardImportDialog = false
+                        pendingFanqieUrl = null
+                    }
+                ) {
+                    Text("暂不导入", color = TextMuted)
+                }
+            },
+            containerColor = CardDark
         )
     }
 
@@ -931,6 +1180,7 @@ fun StudioScreen() {
                     )
                     isSavingShot = false
                     project = updatedProj
+                    LocalAndroidEngine.saveCreatorWork(context, updatedProj)
                     creatorWorks = LocalAndroidEngine.getCreatorWorks(context)
                     shotRefreshVersion += 1
                     editingShot = null
@@ -940,6 +1190,17 @@ fun StudioScreen() {
                         Toast.LENGTH_LONG
                     ).show()
                 }
+            },
+            onDeleteShot = { delId ->
+                val newShots = project.shots.filter { it.id != delId }
+                    .mapIndexed { index, s -> s.copy(id = index + 1) }
+                val updatedProj = project.copy(shots = newShots)
+                project = updatedProj
+                LocalAndroidEngine.saveCreatorWork(context, updatedProj)
+                creatorWorks = LocalAndroidEngine.getCreatorWorks(context)
+                shotRefreshVersion += 1
+                editingShot = null
+                Toast.makeText(context, "🗑️ 已删除镜头 #$delId，分镜已重新按序排列", Toast.LENGTH_SHORT).show()
             },
             onDismiss = {
                 if (!isSavingShot) {

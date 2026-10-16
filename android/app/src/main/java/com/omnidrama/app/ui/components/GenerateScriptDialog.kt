@@ -37,6 +37,7 @@ import kotlinx.coroutines.launch
 @Composable
 fun GenerateScriptDialog(
     serverUrl: String,
+    initialUrl: String = "",
     isGenerating: Boolean,
     onGenerate: (title: String, genre: String, novelText: String) -> Unit,
     onGenerateAndProduce: (title: String, genre: String, novelText: String) -> Unit,
@@ -52,11 +53,29 @@ fun GenerateScriptDialog(
     var novelText by remember { mutableStateOf("") }
 
     // 番茄小说联动状态
-    var fanqieUrl by remember { mutableStateOf("") }
+    var fanqieUrl by remember { mutableStateOf(initialUrl) }
     var isParsingUrl by remember { mutableStateOf(false) }
     var isLoadingRank by remember { mutableStateOf(false) }
     var rankBooks by remember { mutableStateOf<List<FanqieBookItem>>(emptyList()) }
     var showRankPanel by remember { mutableStateOf(false) }
+
+    LaunchedEffect(initialUrl) {
+        if (initialUrl.isNotBlank()) {
+            fanqieUrl = initialUrl
+            isParsingUrl = true
+            try {
+                val book = com.omnidrama.app.data.local.LocalAndroidEngine.importFanqieUrlDirectly(initialUrl.trim(), serverUrl)
+                if (book != null && book.title.isNotBlank()) {
+                    title = book.title
+                    genre = book.genre.ifBlank { "番茄爆款短剧" }
+                    novelText = book.story_text.ifBlank { book.abstract }
+                    Toast.makeText(context, "✅ 成功从剪贴板链接导入《${book.title}》！", Toast.LENGTH_SHORT).show()
+                }
+            } catch (_: Exception) {} finally {
+                isParsingUrl = false
+            }
+        }
+    }
 
     val fanqieGenres = listOf(
         "都市脑洞", "战神赘婿", "豪门总裁", "玄幻修仙",
