@@ -2,7 +2,10 @@
 import re
 from typing import Any, Dict, List
 import requests
-from bs4 import BeautifulSoup
+try:
+    from bs4 import BeautifulSoup
+except ImportError:
+    BeautifulSoup = None
 
 
 class FanqieProvider:
@@ -64,31 +67,42 @@ class FanqieProvider:
         url = f"https://fanqienovel.com/page/{book_id}"
         resp = requests.get(url, headers=cls.HEADERS, timeout=10)
         resp.raise_for_status()
-        soup = BeautifulSoup(resp.text, "html.parser")
+        if BeautifulSoup:
+            soup = BeautifulSoup(resp.text, "html.parser")
+            h1 = soup.find("h1")
+            title = cls.clean_pua(h1.get_text(strip=True)) if h1 else ""
 
-        h1 = soup.find("h1")
-        title = cls.clean_pua(h1.get_text(strip=True)) if h1 else ""
+            author_el = soup.select_one(".author-name-text")
+            author = cls.clean_pua(author_el.get_text(strip=True)) if author_el else "番茄作者"
 
-        author_el = soup.select_one(".author-name-text")
-        author = cls.clean_pua(author_el.get_text(strip=True)) if author_el else "番茄作者"
+            labels = [
+                cls.clean_pua(el.get_text(strip=True))
+                for el in soup.select(".info-label span")
+                if cls.clean_pua(el.get_text(strip=True))
+            ]
+            genre = " · ".join(labels[:3]) if labels else "番茄热门爽文"
 
-        labels = [
-            cls.clean_pua(el.get_text(strip=True))
-            for el in soup.select(".info-label span")
-            if cls.clean_pua(el.get_text(strip=True))
-        ]
-        genre = " · ".join(labels[:3]) if labels else "番茄热门爽文"
+            desc_el = soup.select_one(".page-abstract-content")
+            abstract = cls.clean_pua(desc_el.get_text("\n", strip=True)) if desc_el else ""
 
-        desc_el = soup.select_one(".page-abstract-content")
-        abstract = cls.clean_pua(desc_el.get_text("\n", strip=True)) if desc_el else ""
-
-        chap_els = soup.select(".chapter-item a")
-        chap_titles = [
-            cls.clean_pua(el.get_text(strip=True))
-            for el in chap_els[:6]
-            if cls.clean_pua(el.get_text(strip=True))
-        ]
-        first_chap_title = chap_titles[0] if chap_titles else "第1章"
+            chap_els = soup.select(".chapter-item a")
+            chap_titles = [
+                cls.clean_pua(el.get_text(strip=True))
+                for el in chap_els[:6]
+                if cls.clean_pua(el.get_text(strip=True))
+            ]
+            first_chap_title = chap_titles[0] if chap_titles else "第1章"
+        else:
+            m_title = re.search(r"<h1[^>]*>([^<]+)</h1>", resp.text)
+            title = cls.clean_pua(m_title.group(1).strip()) if m_title else ""
+            m_author = re.search(r'class="author-name-text"[^>]*>([^<]+)</span>', resp.text)
+            author = cls.clean_pua(m_author.group(1).strip()) if m_author else "番茄作者"
+            labels = [cls.clean_pua(x) for x in re.findall(r'class="info-label"[^>]*>.*?<span>([^<]+)</span>', resp.text)]
+            genre = " · ".join(labels[:3]) if labels else "番茄热门爽文"
+            m_desc = re.search(r'class="page-abstract-content"[^>]*>(.*?)</div>', resp.text, re.DOTALL)
+            abstract = cls.clean_pua(re.sub(r"<[^>]+>", "\n", m_desc.group(1)).strip()) if m_desc else ""
+            chap_titles = [cls.clean_pua(x) for x in re.findall(r'class="chapter-item"[^>]*>.*?<a[^>]*>([^<]+)</a>', resp.text)[:6]]
+            first_chap_title = chap_titles[0] if chap_titles else "第1章"
 
         combined_story = abstract
         if chap_titles:
@@ -112,27 +126,39 @@ class FanqieProvider:
         url = f"https://fanqienovel.com/reader/{item_id}"
         resp = requests.get(url, headers=cls.HEADERS, timeout=10)
         resp.raise_for_status()
-        soup = BeautifulSoup(resp.text, "html.parser")
+        if BeautifulSoup:
+            soup = BeautifulSoup(resp.text, "html.parser")
+            title_el = soup.select_one("h1.muye-reader-title, h1")
+            chap_title = cls.clean_pua(title_el.get_text(strip=True)) if title_el else "第1章"
 
-        title_el = soup.select_one("h1.muye-reader-title, h1")
-        chap_title = cls.clean_pua(title_el.get_text(strip=True)) if title_el else "第1章"
+            book_link = soup.select_one('a[href*="/page/"]')
+            if book_link:
+                href = str(book_link.get("href", ""))
+                m_bid = re.search(r"/page/(\d+)", href)
+                if m_bid:
+                    book_info = cls.fetch_book_by_id(m_bid.group(1))
+                    book_info["first_chapter_title"] = chap_title
+                    return book_info
 
-        book_link = soup.select_one('a[href*="/page/"]')
-        if book_link:
-            href = str(book_link.get("href", ""))
-            m_bid = re.search(r"/page/(\d+)", href)
-            if m_bid:
-                book_info = cls.fetch_book_by_id(m_bid.group(1))
+            book_title = cls.clean_pua(book_link.get_text(strip=True)) if book_link else chap_title
+            paragraphs = [
+                cls.clean_pua(p.get_text(strip=True))
+                for p in soup.select(".muye-reader-content p, article p")
+                if cls.clean_pua(p.get_text(strip=True))
+            ]
+            content = "\n".join(paragraphs[:15])
+        else:
+            m_t = re.search(r'<h1[^>]*class="[^"]*muye-reader-title[^"]*"[^>]*>([^<]+)</h1>', resp.text)
+            chap_title = cls.clean_pua(m_t.group(1).strip()) if m_t else "第1章"
+            m_b = re.search(r'/page/(\d+)', resp.text)
+            if m_b:
+                book_info = cls.fetch_book_by_id(m_b.group(1))
                 book_info["first_chapter_title"] = chap_title
                 return book_info
-
-        book_title = cls.clean_pua(book_link.get_text(strip=True)) if book_link else chap_title
-        paragraphs = [
-            cls.clean_pua(p.get_text(strip=True))
-            for p in soup.select(".muye-reader-content p, article p")
-            if cls.clean_pua(p.get_text(strip=True))
-        ]
-        content = "\n".join(paragraphs[:15])
+            book_title = chap_title
+            m_c = re.findall(r'<p[^>]*>([^<]+)</p>', resp.text)
+            paragraphs = [cls.clean_pua(p.strip()) for p in m_c if cls.clean_pua(p.strip())]
+            content = "\n".join(paragraphs[:15])
 
         return {
             "book_id": item_id,
