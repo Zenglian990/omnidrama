@@ -105,7 +105,7 @@ fun BrandLogo(
                         .padding(horizontal = 5.dp, vertical = 1.dp)
                 ) {
                     Text(
-                        text = "PRO",
+                        text = "PRO v2.4",
                         color = Color(0xFF0F131D),
                         fontSize = 9.sp,
                         fontWeight = FontWeight.Black
