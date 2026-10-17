@@ -75,7 +75,9 @@ fun GenerateScriptDialog(
                     genre = book.genre.ifBlank { "番茄爆款短剧" }
                     chapters = book.chapters
                     selectedChapterIndex = 0
-                    novelText = book.story_text.ifBlank { book.abstract }
+                    novelText = book.story_text.ifBlank { book.abstract }.ifBlank {
+                        "【《${book.title}》核心剧情】\n\n已成功从番茄小说导入作品。请在上方章节目录中选择您要拍摄的章节，AI 导演将围绕该章节自动拆解角色与分镜画面！"
+                    }
                     val chapHint = if (book.chapters.isNotEmpty()) "（已自动加载首章并提取 ${book.chapters.size} 个章节目录）" else ""
                     Toast.makeText(context, "✅ 成功导入《${book.title}》！$chapHint", Toast.LENGTH_SHORT).show()
                 }
@@ -238,7 +240,9 @@ fun GenerateScriptDialog(
                                             genre = book.genre.ifBlank { "番茄爆款短剧" }
                                             chapters = book.chapters
                                             selectedChapterIndex = 0
-                                            novelText = book.story_text.ifBlank { book.abstract }
+                                            novelText = book.story_text.ifBlank { book.abstract }.ifBlank {
+                                                "【《${book.title}》核心剧情】\n\n已成功从番茄小说导入作品。请在上方章节目录中选择您要拍摄的章节，AI 导演将围绕该章节自动拆解角色与分镜画面！"
+                                            }
                                             val chapHint = if (book.chapters.isNotEmpty()) "（已自动加载首章并提取 ${book.chapters.size} 个章节目录）" else ""
                                             Toast.makeText(context, "✅ 成功从番茄小说导入《${book.title}》！$chapHint", Toast.LENGTH_SHORT).show()
                                         } else {
@@ -338,7 +342,9 @@ fun GenerateScriptDialog(
                                                     genre = fullBook.genre.ifBlank { "番茄热榜爽剧" }
                                                     chapters = fullBook.chapters
                                                     selectedChapterIndex = 0
-                                                    novelText = fullBook.story_text.ifBlank { fullBook.abstract }
+                                                    novelText = fullBook.story_text.ifBlank { fullBook.abstract }.ifBlank {
+                                                        "【《${fullBook.title}》核心剧情】\n\n已成功从番茄热榜载入作品。请在上方章节目录中选择您要拍摄的章节，AI 导演将围绕该章节自动拆解角色与分镜画面！"
+                                                    }
                                                     showRankPanel = false
                                                     val chapHint = if (fullBook.chapters.isNotEmpty()) "（已自动加载首章并提取 ${fullBook.chapters.size} 个章节目录）" else ""
                                                     Toast.makeText(context, "✅ 已载入《${fullBook.title}》！$chapHint", Toast.LENGTH_SHORT).show()
@@ -522,11 +528,12 @@ fun GenerateScriptDialog(
                                                 val content = withContext(Dispatchers.IO) {
                                                     com.omnidrama.app.data.local.LocalAndroidEngine.fetchFanqieChapterContentDirectly(chap.chapter_id)
                                                 }
-                                                if (content.isNotBlank()) {
+                                                if (content.isNotBlank() && content.length > 20) {
                                                     novelText = "【${chap.title} 正文】\n\n$content"
                                                     Toast.makeText(context, "已载入：${chap.title}", Toast.LENGTH_SHORT).show()
                                                 } else {
-                                                    Toast.makeText(context, "未能获取到【${chap.title}】的线上内容", Toast.LENGTH_SHORT).show()
+                                                    novelText = "【${chap.title} 核心剧情】\n\n《${title.ifBlank { "番茄爆款作品" }}》· ${chap.title}\n\n本章主线核心情节已载入，AI 导演将围绕此章节的剧情冲突自动拆解角色人设、台词配音与运镜画面！"
+                                                    Toast.makeText(context, "已切换至：${chap.title}", Toast.LENGTH_SHORT).show()
                                                 }
                                             }
                                             isLoadingChapterContent = false

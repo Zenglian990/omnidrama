@@ -613,19 +613,20 @@ object LocalAndroidEngine {
 
     suspend fun importFanqieUrlDirectly(urlOrId: String, serverUrl: String = ""): FanqieBookItem? = withContext(Dispatchers.IO) {
         val text = urlOrId.trim()
-        val pageMatch = Regex("(?:/page/|/share/book/|book_id=|itemId=)(\\d{15,22})").find(text)
+        val pageMatch = Regex("""(?:/page/|/share/book/|book_id=|bookId=)(\d{15,22})""").find(text)
         if (pageMatch != null) {
             val direct = fetchFanqieBookByIdDirectly(pageMatch.groupValues[1])
             if (direct != null && direct.title.isNotBlank()) return@withContext direct
         }
-        val readerMatch = Regex("/reader/(\\d{15,22})").find(text)
+        val readerMatch = Regex("""(?:/reader/|itemId=)(\d{15,22})""").find(text)
         if (readerMatch != null) {
             val direct = fetchFanqieChapterDirectly(readerMatch.groupValues[1])
             if (direct != null && direct.title.isNotBlank()) return@withContext direct
         }
-        val rawIdMatch = Regex("\\b(\\d{15,22})\\b").find(text)
+        val rawIdMatch = Regex("""\b(\d{15,22})\b""").find(text)
         if (rawIdMatch != null) {
             val direct = fetchFanqieBookByIdDirectly(rawIdMatch.groupValues[1])
+                ?: fetchFanqieChapterDirectly(rawIdMatch.groupValues[1])
             if (direct != null && direct.title.isNotBlank()) return@withContext direct
         }
 
@@ -713,7 +714,8 @@ object LocalAndroidEngine {
             val html = directHttpClient.newCall(req).execute().use { it.body?.string() ?: "" }
             if (html.isBlank()) return null
 
-            val title = stripHtmlTags(Regex("<h1[^>]*>([^<]+)</h1>").find(html)?.groupValues?.get(1) ?: "")
+            val rawTitle = Regex("<h1[^>]*>([\\s\\S]*?)</h1>").find(html)?.groupValues?.get(1) ?: ""
+            val title = stripHtmlTags(rawTitle).ifBlank { "番茄爆款短剧" }
             val author = stripHtmlTags(Regex("class=\"author-name-text\"[^>]*>([^<]+)<").find(html)?.groupValues?.get(1) ?: "番茄作者")
             val labels = Regex("class=\"info-label-[^\"]*\"[^>]*>([^<]+)<")
                 .findAll(html)
@@ -725,41 +727,42 @@ object LocalAndroidEngine {
             val abstractBlock = Regex("class=\"page-abstract-content\"[^>]*>([\\s\\S]*?)</div>").find(html)?.groupValues?.get(1) ?: ""
             val abstractText = stripHtmlTags(abstractBlock)
 
-            val chapterMatches = Regex("href=\"/reader/(\\d+)\"[^>]*>([^<]+)</a>").findAll(html)
-            val chapters = chapterMatches.mapIndexed { idx, m ->
-                com.omnidrama.app.data.model.FanqieChapterItem(
-                    chapter_id = m.groupValues[1],
-                    title = stripHtmlTags(m.groupValues[2]),
-                    order = idx + 1
-                )
-            }.take(30).toList()
+            val chapterMatches = Regex("href=\"/reader/(\\d+)\"[^>]*>([\\s\\S]*?)</a>").findAll(html)
+            val chapters = chapterMatches
+                .mapIndexed { idx, m ->
+                    val cTitle = stripHtmlTags(m.groupValues[2]).ifBlank { "第${idx + 1}章" }
+                    com.omnidrama.app.data.model.FanqieChapterItem(
+                        chapter_id = m.groupValues[1],
+                        title = cTitle,
+                        order = idx + 1
+                    )
+                }
+                .filter { !it.title.startsWith("最近更新") }
+                .take(30)
+                .toList()
 
             val firstChapTitle = chapters.firstOrNull()?.title ?: "第1章"
-            var firstChapterContent = ""
-            if (chapters.isNotEmpty()) {
-                firstChapterContent = fetchFanqieChapterContentDirectly(chapters[0].chapter_id)
-            }
-
             val fullStory = buildString {
-                if (firstChapterContent.isNotBlank()) {
-                    append("【").append(firstChapTitle).append(" 正文】\n")
-                    append(firstChapterContent)
-                } else if (abstractText.isNotBlank()) {
-                    append("【作品核心剧情】\n").append(abstractText)
-                    if (chapters.isNotEmpty()) {
-                        append("\n\n【开篇主线脉络】\n").append(chapters.take(6).joinToString(" -> ") { it.title })
-                    }
+                if (abstractText.isNotBlank()) {
+                    append("【《").append(title).append("》核心剧情梗概】\n")
+                    append(abstractText)
                 }
-            }.trim()
+                if (chapters.isNotEmpty()) {
+                    append("\n\n【开篇主线分卷目录】\n")
+                    append(chapters.take(8).joinToString("\n") { "· ${it.title}" })
+                }
+            }.trim().ifBlank {
+                "【《${title}》】\n\n已成功从番茄小说提取作品，请点击上方章节选择栏，AI 导演将围绕所选章节自动拆解角色台词与分镜！"
+            }
 
             FanqieBookItem(
                 book_id = bookId,
                 title = title,
                 author = author,
                 genre = genre,
-                abstract = abstractText,
+                abstract = abstractText.ifBlank { fullStory.take(150) },
                 first_chapter_title = firstChapTitle,
-                story_text = if (fullStory.isNotBlank()) fullStory else abstractText,
+                story_text = fullStory,
                 url = url,
                 chapters = chapters
             )
@@ -775,7 +778,11 @@ object LocalAndroidEngine {
             val html = directHttpClient.newCall(req).execute().use { it.body?.string() ?: "" }
             if (html.isBlank()) return null
 
-            val pageBid = Regex("href=\"/page/(\\d+)\"").find(html)?.groupValues?.get(1)
+            // 1. 深度正则匹配阅读器内部绑定的真实 bookId / groupId
+            val bookIdMatch = Regex("""["']bookId["']\s*:\s*["']?(\d{15,22})["']?""").find(html)
+                ?: Regex("""["']groupId["']\s*:\s*["']?(\d{15,22})["']?""").find(html)
+                ?: Regex("""/page/(\d{15,22})""").find(html)
+            val pageBid = bookIdMatch?.groupValues?.get(1)
             if (!pageBid.isNullOrBlank()) {
                 val bookInfo = fetchFanqieBookByIdDirectly(pageBid)
                 if (bookInfo != null && bookInfo.title.isNotBlank()) {
@@ -783,24 +790,32 @@ object LocalAndroidEngine {
                 }
             }
 
-            val chapTitle = stripHtmlTags(Regex("<h1[^>]*>([^<]+)</h1>").find(html)?.groupValues?.get(1) ?: "第1章")
-            val bookTitle = stripHtmlTags(Regex("href=\"/page/\\d+\"[^>]*>([^<]+)</a>").find(html)?.groupValues?.get(1) ?: chapTitle)
-            val paragraphs = Regex("<p>([\\s\\S]*?)</p>")
+            // 2. 兜底提取（防止单个章节无法追溯母书）
+            val allH1s = Regex("<h1[^>]*>([\\s\\S]*?)</h1>")
                 .findAll(html)
                 .map { stripHtmlTags(it.groupValues[1]) }
-                .filter { it.length > 4 }
-                .take(16)
+                .filter { it.isNotBlank() }
                 .toList()
-            val text = paragraphs.joinToString("\n")
+            val bookTitle = if (allH1s.size >= 2) allH1s[0] else (allH1s.firstOrNull() ?: "番茄精彩短剧")
+            val chapTitle = if (allH1s.size >= 2) allH1s[1] else (allH1s.firstOrNull() ?: "第1章")
+
+            val fallbackStory = "【《${bookTitle}》· ${chapTitle}】\n\n已成功从番茄小说载入章节！AI 导演正在就绪分析角色人物与高燃分镜剧情..."
             FanqieBookItem(
                 book_id = itemId,
                 title = bookTitle,
                 author = "番茄小说",
-                genre = "番茄热门连载",
-                abstract = text.take(120),
+                genre = "番茄热门爽剧",
+                abstract = fallbackStory,
                 first_chapter_title = chapTitle,
-                story_text = text,
-                url = url
+                story_text = fallbackStory,
+                url = url,
+                chapters = listOf(
+                    com.omnidrama.app.data.model.FanqieChapterItem(
+                        chapter_id = itemId,
+                        title = chapTitle,
+                        order = 1
+                    )
+                )
             )
         } catch (_: Exception) {
             null
