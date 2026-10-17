@@ -155,15 +155,30 @@ fun ProductionStudioDialog(
                 return@launch
             }
 
-            // 3. 轮询远端状态；若远端空闲未开工 (progress=0 && !is_rendering) 超过 2 次，立即手机本地接管！
+            // 3. 轮询远端状态；若远端空闲未开工 (progress=0 && !is_rendering) 或在某进度卡死超过 10 秒，立即手机本地接管！
             var failCount = 0
             var idleCount = 0
+            var lastProgress = -1
+            var stuckCount = 0
             var finished = false
             while (!finished && !usingLocalEngine) {
                 delay(1200)
                 val status = repo.getRenderStatus(serverUrl)
                 if (status != null) {
                     failCount = 0
+                    if (status.progress == lastProgress && status.is_rendering) {
+                        stuckCount++
+                        // 若远端任务卡在某个百分比（如 5% 云端无常驻 CPU 配额挂起）超过 8 次（约 10 秒），无缝切换手机硬件秒级渲染
+                        if (stuckCount >= 8) {
+                            runPhoneHardwareRender()
+                            finished = true
+                            break
+                        }
+                    } else {
+                        lastProgress = status.progress
+                        stuckCount = 0
+                    }
+
                     if (status.error != null) {
                         runPhoneHardwareRender()
                         finished = true

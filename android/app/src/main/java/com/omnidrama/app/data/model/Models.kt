@@ -78,6 +78,12 @@ data class RenderStatusResponse(
     val error: String? = null
 )
 
+data class FanqieChapterItem(
+    val chapter_id: String = "",
+    val title: String = "",
+    val order: Int = 1
+)
+
 data class FanqieBookItem(
     val book_id: String = "",
     val title: String = "",
@@ -86,5 +92,7 @@ data class FanqieBookItem(
     val abstract: String = "",
     val first_chapter_title: String = "",
     val story_text: String = "",
-    val url: String = ""
+    val url: String = "",
+    val chapters: List<FanqieChapterItem> = emptyList()
 )
+

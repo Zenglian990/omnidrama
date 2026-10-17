@@ -672,6 +672,40 @@ object LocalAndroidEngine {
             .joinToString("\n")
     }
 
+    fun fetchFanqieChapterContentDirectly(chapterId: String): String {
+        return try {
+            val url = "https://fanqienovel.com/reader/$chapterId"
+            val req = Request.Builder().url(url).build()
+            val html = directHttpClient.newCall(req).execute().use { it.body?.string() ?: "" }
+            if (html.isBlank()) return ""
+            val paragraphs = Regex("<p>([\\s\\S]*?)</p>")
+                .findAll(html)
+                .map { stripHtmlTags(it.groupValues[1]) }
+                .filter { it.length > 2 }
+                .toList()
+            paragraphs.joinToString("\n\n")
+        } catch (_: Exception) {
+            ""
+        }
+    }
+
+    fun splitTextIntoChapters(text: String): List<Pair<String, String>> {
+        val chapterPattern = Regex("(?m)^(?:第[0-9一二三四五六七八九十百千]+[章回集节卷]|[Cc]hapter\\s*\\d+).*$")
+        val matches = chapterPattern.findAll(text).toList()
+        if (matches.size <= 1) {
+            return listOf(Pair("第1章", text.trim()))
+        }
+        val results = mutableListOf<Pair<String, String>>()
+        for (i in matches.indices) {
+            val title = matches[i].value.trim()
+            val start = matches[i].range.last + 1
+            val end = if (i + 1 < matches.size) matches[i + 1].range.first else text.length
+            val content = text.substring(start, end).trim()
+            results.add(Pair(title, content))
+        }
+        return results
+    }
+
     private fun fetchFanqieBookByIdDirectly(bookId: String): FanqieBookItem? {
         return try {
             val url = "https://fanqienovel.com/page/$bookId"
@@ -691,20 +725,30 @@ object LocalAndroidEngine {
             val abstractBlock = Regex("class=\"page-abstract-content\"[^>]*>([\\s\\S]*?)</div>").find(html)?.groupValues?.get(1) ?: ""
             val abstractText = stripHtmlTags(abstractBlock)
 
-            val chapTitles = Regex("class=\"chapter-item\"[\\s\\S]*?href=\"/reader/\\d+\"[^>]*>([^<]+)</a>")
-                .findAll(html)
-                .map { stripHtmlTags(it.groupValues[1]) }
-                .filter { it.isNotEmpty() }
-                .take(6)
-                .toList()
-            val firstChapTitle = chapTitles.firstOrNull() ?: "第1章"
+            val chapterMatches = Regex("href=\"/reader/(\\d+)\"[^>]*>([^<]+)</a>").findAll(html)
+            val chapters = chapterMatches.mapIndexed { idx, m ->
+                com.omnidrama.app.data.model.FanqieChapterItem(
+                    chapter_id = m.groupValues[1],
+                    title = stripHtmlTags(m.groupValues[2]),
+                    order = idx + 1
+                )
+            }.take(30).toList()
+
+            val firstChapTitle = chapters.firstOrNull()?.title ?: "第1章"
+            var firstChapterContent = ""
+            if (chapters.isNotEmpty()) {
+                firstChapterContent = fetchFanqieChapterContentDirectly(chapters[0].chapter_id)
+            }
 
             val fullStory = buildString {
-                if (abstractText.isNotBlank()) {
+                if (firstChapterContent.isNotBlank()) {
+                    append("【").append(firstChapTitle).append(" 正文】\n")
+                    append(firstChapterContent)
+                } else if (abstractText.isNotBlank()) {
                     append("【作品核心剧情】\n").append(abstractText)
-                }
-                if (chapTitles.isNotEmpty()) {
-                    append("\n\n【开篇主线脉络】\n").append(chapTitles.joinToString(" -> "))
+                    if (chapters.isNotEmpty()) {
+                        append("\n\n【开篇主线脉络】\n").append(chapters.take(6).joinToString(" -> ") { it.title })
+                    }
                 }
             }.trim()
 
@@ -716,7 +760,8 @@ object LocalAndroidEngine {
                 abstract = abstractText,
                 first_chapter_title = firstChapTitle,
                 story_text = if (fullStory.isNotBlank()) fullStory else abstractText,
-                url = url
+                url = url,
+                chapters = chapters
             )
         } catch (_: Exception) {
             null
@@ -1665,7 +1710,8 @@ object LocalAndroidEngine {
     suspend fun renderFullMp4OnPhone(
         context: Context,
         project: ProjectData,
-        onProgress: (progress: Int, step: String, log: String) -> Unit
+        customOutputFile: File? = null,
+        onProgress: (progress: Int, step: String, log: String) -> Unit = { _, _, _ -> }
     ): String? = withContext(Dispatchers.IO) {
         val shots = project.shots
         if (shots.isEmpty()) return@withContext null
@@ -1673,7 +1719,7 @@ object LocalAndroidEngine {
         val safeTitle = project.title.replace(Regex("[^\\u4e00-\\u9fa5a-zA-Z0-9_-]"), "_").ifEmpty { "creator_drama" }
         val outDir = File(context.filesDir, "projects/$safeTitle")
         outDir.mkdirs()
-        val outMp4 = File(outDir, "${safeTitle}_成片.mp4")
+        val outMp4 = customOutputFile ?: File(outDir, "${safeTitle}_成片.mp4")
         if (outMp4.exists()) outMp4.delete()
 
         val totalShots = max(1, shots.size)
@@ -1973,6 +2019,31 @@ object LocalAndroidEngine {
         onProgress(100, "✅ 《${project.title}》有声成片渲染完成！", "🏆 H.264+AAC 有声成片已生成：${outMp4.absolutePath}")
         return@withContext outMp4.absolutePath
     }
+
+    suspend fun renderSingleShotMp4OnPhone(
+        context: Context,
+        projectTitle: String,
+        projectGenre: String,
+        shot: ShotItem
+    ): String? = withContext(Dispatchers.IO) {
+        val safeTitle = projectTitle.replace(Regex("[^\\u4e00-\\u9fa5a-zA-Z0-9_-]"), "_").ifEmpty { "creator_drama" }
+        val outDir = File(context.filesDir, "projects/$safeTitle")
+        outDir.mkdirs()
+        val outMp4 = File(outDir, "shot_${shot.id}_video.mp4")
+        renderFullMp4OnPhone(
+            context = context,
+            project = ProjectData(title = projectTitle, genre = projectGenre, shots = listOf(shot)),
+            customOutputFile = outMp4,
+            onProgress = { _, _, _ -> }
+        )
+    }
+
+    fun getLocalShotVideoFile(context: Context, projectTitle: String, shotId: Int): File {
+        val safeTitle = projectTitle.replace(Regex("[^\\u4e00-\\u9fa5a-zA-Z0-9_-]"), "_").ifEmpty { "creator_drama" }
+        val outDir = File(context.filesDir, "projects/$safeTitle")
+        return File(outDir, "shot_${shotId}_video.mp4")
+    }
+
 
     private fun encodeYUV420SP(yuv420sp: ByteArray, argb: IntArray, width: Int, height: Int) {
         val frameSize = width * height

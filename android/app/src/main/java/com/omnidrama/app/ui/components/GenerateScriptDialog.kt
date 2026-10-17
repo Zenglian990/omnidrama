@@ -32,7 +32,9 @@ import androidx.compose.ui.window.Dialog
 import com.omnidrama.app.data.model.FanqieBookItem
 import com.omnidrama.app.data.repository.DramaRepository
 import com.omnidrama.app.ui.theme.*
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 @Composable
 fun GenerateScriptDialog(
@@ -51,6 +53,9 @@ fun GenerateScriptDialog(
     var title by remember { mutableStateOf("") }
     var genre by remember { mutableStateOf("") }
     var novelText by remember { mutableStateOf("") }
+    var chapters by remember { mutableStateOf<List<com.omnidrama.app.data.model.FanqieChapterItem>>(emptyList()) }
+    var selectedChapterIndex by remember { mutableIntStateOf(0) }
+    var isLoadingChapterContent by remember { mutableStateOf(false) }
 
     // 番茄小说联动状态
     var fanqieUrl by remember { mutableStateOf(initialUrl) }
@@ -68,8 +73,11 @@ fun GenerateScriptDialog(
                 if (book != null && book.title.isNotBlank()) {
                     title = book.title
                     genre = book.genre.ifBlank { "番茄爆款短剧" }
+                    chapters = book.chapters
+                    selectedChapterIndex = 0
                     novelText = book.story_text.ifBlank { book.abstract }
-                    Toast.makeText(context, "✅ 成功从剪贴板链接导入《${book.title}》！", Toast.LENGTH_SHORT).show()
+                    val chapHint = if (book.chapters.isNotEmpty()) "（已自动加载首章并提取 ${book.chapters.size} 个章节目录）" else ""
+                    Toast.makeText(context, "✅ 成功导入《${book.title}》！$chapHint", Toast.LENGTH_SHORT).show()
                 }
             } catch (_: Exception) {} finally {
                 isParsingUrl = false
@@ -228,8 +236,11 @@ fun GenerateScriptDialog(
                                         if (book != null && book.title.isNotBlank()) {
                                             title = book.title
                                             genre = book.genre.ifBlank { "番茄爆款短剧" }
+                                            chapters = book.chapters
+                                            selectedChapterIndex = 0
                                             novelText = book.story_text.ifBlank { book.abstract }
-                                            Toast.makeText(context, "✅ 成功从番茄小说导入《${book.title}》！", Toast.LENGTH_SHORT).show()
+                                            val chapHint = if (book.chapters.isNotEmpty()) "（已自动加载首章并提取 ${book.chapters.size} 个章节目录）" else ""
+                                            Toast.makeText(context, "✅ 成功从番茄小说导入《${book.title}》！$chapHint", Toast.LENGTH_SHORT).show()
                                         } else {
                                             Toast.makeText(context, "⚠️ 链接解析未获取到正文，请检查链接或直接粘贴章节内容", Toast.LENGTH_LONG).show()
                                         }
@@ -325,9 +336,12 @@ fun GenerateScriptDialog(
                                                     isParsingUrl = false
                                                     title = fullBook.title
                                                     genre = fullBook.genre.ifBlank { "番茄热榜爽剧" }
+                                                    chapters = fullBook.chapters
+                                                    selectedChapterIndex = 0
                                                     novelText = fullBook.story_text.ifBlank { fullBook.abstract }
                                                     showRankPanel = false
-                                                    Toast.makeText(context, "✅ 已载入《${fullBook.title}》，可继续自由修改内容！", Toast.LENGTH_SHORT).show()
+                                                    val chapHint = if (fullBook.chapters.isNotEmpty()) "（已自动加载首章并提取 ${fullBook.chapters.size} 个章节目录）" else ""
+                                                    Toast.makeText(context, "✅ 已载入《${fullBook.title}》！$chapHint", Toast.LENGTH_SHORT).show()
                                                 }
                                             }
                                             .padding(8.dp),
@@ -456,6 +470,109 @@ fun GenerateScriptDialog(
                 )
 
                 Spacer(modifier = Modifier.height(10.dp))
+
+                // 📚 章节选择与目录导航栏
+                if (chapters.isNotEmpty()) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "📚 章节目录 (${chapters.size} 章 · 点击直接切换章节正文):",
+                            color = AccentGold,
+                            fontSize = 11.5.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        if (isLoadingChapterContent) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(12.dp),
+                                    color = BrandCyan,
+                                    strokeWidth = 2.dp
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("正在拉取正文...", color = BrandCyan, fontSize = 10.sp)
+                            }
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        chapters.forEachIndexed { idx, chap ->
+                            val isSel = selectedChapterIndex == idx
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(if (isSel) AccentGold.copy(alpha = 0.2f) else Color(0xFF1E2638))
+                                    .border(
+                                        1.dp,
+                                        if (isSel) AccentGold else BorderDark,
+                                        RoundedCornerShape(8.dp)
+                                    )
+                                    .clickable(enabled = !isLoadingChapterContent) {
+                                        selectedChapterIndex = idx
+                                        scope.launch {
+                                            isLoadingChapterContent = true
+                                            if (chap.chapter_id.isNotBlank()) {
+                                                val content = withContext(Dispatchers.IO) {
+                                                    com.omnidrama.app.data.local.LocalAndroidEngine.fetchFanqieChapterContentDirectly(chap.chapter_id)
+                                                }
+                                                if (content.isNotBlank()) {
+                                                    novelText = "【${chap.title} 正文】\n\n$content"
+                                                    Toast.makeText(context, "已载入：${chap.title}", Toast.LENGTH_SHORT).show()
+                                                } else {
+                                                    Toast.makeText(context, "未能获取到【${chap.title}】的线上内容", Toast.LENGTH_SHORT).show()
+                                                }
+                                            }
+                                            isLoadingChapterContent = false
+                                        }
+                                    }
+                                    .padding(horizontal = 10.dp, vertical = 6.dp)
+                            ) {
+                                Text(
+                                    text = chap.title,
+                                    color = if (isSel) AccentGold else TextSecondary,
+                                    fontSize = 11.sp,
+                                    fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal
+                                )
+                            }
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(10.dp))
+                } else if (novelText.length > 300) {
+                    Row(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(Color(0xFF1E2638))
+                            .clickable {
+                                val splitList = com.omnidrama.app.data.local.LocalAndroidEngine.splitTextIntoChapters(novelText)
+                                if (splitList.size > 1) {
+                                    chapters = splitList.mapIndexed { idx, item ->
+                                        com.omnidrama.app.data.model.FanqieChapterItem(
+                                            chapter_id = "",
+                                            title = item.first,
+                                            order = idx + 1
+                                        )
+                                    }
+                                    selectedChapterIndex = 0
+                                    novelText = "【${splitList[0].first}】\n\n${splitList[0].second}"
+                                    Toast.makeText(context, "✅ 成功提取到 ${splitList.size} 个章节目录！", Toast.LENGTH_SHORT).show()
+                                } else {
+                                    Toast.makeText(context, "未识别到“第X章”特征，当前作为单章节处理", Toast.LENGTH_SHORT).show()
+                                }
+                            }
+                            .padding(horizontal = 8.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("✂️ 识别长文本中的章节目录", color = BrandCyan, fontSize = 10.5.sp, fontWeight = FontWeight.Bold)
+                    }
+                    Spacer(modifier = Modifier.height(10.dp))
+                }
 
                 // 小说文本
                 Text("小说章节正文 / 剧本内容:", color = TextSecondary, fontSize = 12.sp, fontWeight = FontWeight.Medium)
