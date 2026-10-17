@@ -17,7 +17,7 @@ except ImportError:
         DramaProject, CharacterAsset, Shot, ShotScaleEnum, CameraMotionEnum
     )
 
-DIRECTOR_SYSTEM_PROMPT = """你是一名资深短剧/漫剧总导演。你的任务是将用户提供的小说或故事文本拆解为工业级分镜剧本。
+DIRECTOR_SYSTEM_PROMPT = """你是一名资深真人影视短剧总导演。你的任务是将用户提供的小说或故事文本拆解为工业级真人实拍电影分镜剧本。
 请严格输出合法的 JSON 对象（不要使用 markdown 代码块包裹，直接输出 JSON），结构必须完全匹配以下格式：
 {
   "title": "短剧标题",
@@ -27,9 +27,9 @@ DIRECTOR_SYSTEM_PROMPT = """你是一名资深短剧/漫剧总导演。你的任
     {
       "name": "角色名",
       "gender": "male 或 female",
-      "visual_tags": "英文生图外观提示词，例如: handsome young man, sharp cold eyes, black suit, anime style",
-      "voice_name": "zh-CN-YunxiNeural 或 zh-CN-XiaoxiaoNeural 或 zh-CN-YunjianNeural",
-      "bio": "角色身份描述（如：隐世龙王 / 豪门千金 / 狂妄反派）"
+      "visual_tags": "英文真实演员生图外观提示词，例如: photorealistic Chinese male actor, 26 years old, sharp eyes, tailored suit, realistic skin texture, cinematic ARRI Alexa lighting, no cartoon, no anime",
+      "voice_name": "zh-CN-YunxiNeural 或 zh-CN-XiaoxiaoNeural 或 zh-CN-YunjianNeural 或 zh-CN-YunyangNeural",
+      "bio": "角色身份描述（如：隐世龙王 / 豪门千金 / 铁血统帅）"
     }
   ],
   "shots": [
@@ -38,15 +38,16 @@ DIRECTOR_SYSTEM_PROMPT = """你是一名资深短剧/漫剧总导演。你的任
       "shot_scale": "wide_shot 或 full_shot 或 medium_shot 或 close_up 或 extreme_close_up",
       "camera_motion": "zoom_in 或 zoom_out 或 pan_left 或 pan_right 或 shake 或 static",
       "speaker": "说话角色名 或 旁白",
-      "dialogue": "该镜头的台词或旁白内容（中文）",
-      "visual_prompt": "英文画面描述词，用于AI生图或Pexels搜索，例如: masterpiece, 8k anime vertical drama, dark mansion hall, heavy rain outside window, cinematic lighting"
+      "dialogue": "该镜头的纯台词或旁白对白（中文，严禁包含'某某说'或提示词标签）",
+      "visual_prompt": "英文真实电影剧照描述词，用于顶级AI生图与图生视频，例如: 8k cinematic live-action movie still, shot on ARRI Alexa 65, photorealistic Chinese actor playing the character, dramatic atmospheric lighting, 35mm film grain, shallow depth of field, authentic costume, masterpiece, no cartoon, no anime, vertical 9:16"
     }
   ]
 }
 要求：
-1. 至少拆解出 4 到 10 个紧凑高燃的分镜（shots）。
+1. 至少拆解出 4 到 10 个紧凑高燃的分镜（shots），台词必须是角色纯对白，杜绝小说叙述废话。
 2. shot_scale 只能取: extreme_close_up, close_up, medium_shot, full_shot, wide_shot 之一。
 3. camera_motion 只能取: zoom_in, zoom_out, pan_left, pan_right, shake, static 之一。
+4. 视觉描述词必须严格遵循真实真人演员电影质感，严禁出现 anime、manga、cartoon、2D 等任何二次元卡通词汇。
 """
 
 ACTION_VERBS = ["狂妄大笑", "冷笑", "冷哼道", "怒吼", "大笑", "喊道", "喝道", "狂笑", "冷哼", "说道", "轻蔑道", "怒斥道", "笑道", "怒道", "说道", "道", "说"]
@@ -168,7 +169,7 @@ class DirectorAgent:
                 characters_dict[speaker] = CharacterAsset(
                     name=speaker,
                     gender="female" if is_female else "male",
-                    visual_tags=f"{speaker}, anime aesthetic, detailed face, sharp eyes, high contrast, cinematic lighting",
+                    visual_tags=f"photorealistic Chinese {'female' if is_female else 'male'} actor, 8k cinema movie still, authentic facial skin texture, subtle pores, natural hair, playing {speaker}, dramatic film lighting, no cartoon, no anime",
                     voice_name="zh-CN-XiaoxiaoNeural" if is_female else "zh-CN-YunxiNeural",
                     bio="核心角色"
                 )
@@ -190,8 +191,10 @@ class DirectorAgent:
                 motion = CameraMotionEnum.PAN_RIGHT if shot_id % 2 == 0 else CameraMotionEnum.PAN_LEFT
 
             visual_prompt = (
-                f"masterpiece, 8k anime vertical drama style, {scale.value}, "
-                f"character {speaker}, scene: {dialogue}, cinematic lighting, dramatic atmosphere"
+                f"8k cinematic live-action movie still, shot on ARRI Alexa 65, 35mm Panavision anamorphic lens, "
+                f"{scale.value}, photorealistic Chinese actor playing {speaker}, {dialogue}, "
+                f"authentic facial texture, subtle skin pores, realistic costume, theatrical cinema lighting, 35mm film grain, "
+                f"blockbuster cinematography, masterpiece, no cartoon, no anime, vertical 9:16"
             )
 
             shots.append(
@@ -210,7 +213,7 @@ class DirectorAgent:
             characters_dict["主角"] = CharacterAsset(
                 name="主角",
                 gender="male",
-                visual_tags="young hero, determined expression, black hair, anime style",
+                visual_tags="photorealistic handsome Chinese male actor, 26 years old, determined expression, authentic skin texture and pores, realistic costume, 8k cinema still, no cartoon, no anime",
                 voice_name="zh-CN-YunxiNeural",
                 bio="男主角"
             )

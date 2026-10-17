@@ -105,15 +105,15 @@ fun BrandLogo(
                         .padding(horizontal = 5.dp, vertical = 1.dp)
                 ) {
                     Text(
-                        text = "PRO v2.4",
+                        text = "CINEMA PRO v2.5",
                         color = Color(0xFF0F131D),
-                        fontSize = 9.sp,
+                        fontSize = 8.5.sp,
                         fontWeight = FontWeight.Black
                     )
                 }
             }
             Text(
-                text = "好莱坞影视工业级全链路 AI 制片",
+                text = "8K真人电影级工业全流程制片",
                 color = Color(0xFF94A3B8),
                 fontSize = 10.sp,
                 fontWeight = FontWeight.Normal

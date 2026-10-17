@@ -1067,10 +1067,10 @@ object LocalAndroidEngine {
         val geminiKey = keys["GEMINI_API_KEY"] ?: ""
 
         val sysPrompt = """
-            你是一位好莱坞级竖屏短剧总导演。请将用户输入的小说文本拆解为6到8个分镜镜头及角色列表，严格输出纯JSON对象（不要markdown代码块），格式如下：
+            你是一位资深真人影视短剧总导演。请将用户输入的小说文本拆解为6到8个分镜镜头及角色列表，严格输出纯JSON对象（不要markdown代码块），格式如下：
             {
-              "characters": [{"name":"角色名","role":"身份定位","voice":"云希 (磁性沉稳霸道)","traits":"外貌与性格特征"}],
-              "shots": [{"id":1,"speaker":"说话人或旁白","scale":"MEDIUM_SHOT","motion":"ZOOM_IN","dialogue":"台词或旁白","visual_prompt":"9:16 vertical anime cinematic frame prompt"}]
+              "characters": [{"name":"角色名","role":"身份定位","voice":"云希 (磁性沉稳霸道)","traits":"真实演员外貌与性格特征"}],
+              "shots": [{"id":1,"speaker":"说话人或旁白","scale":"MEDIUM_SHOT","motion":"ZOOM_IN","dialogue":"角色纯台词或对白","visual_prompt":"8k cinematic live-action movie still, shot on ARRI Alexa 65, photorealistic Chinese actor, authentic skin pores, 35mm film grain, vertical 9:16, no cartoon, no anime"}]
             }
         """.trimIndent()
 
@@ -1228,7 +1228,7 @@ object LocalAndroidEngine {
                 image = "",
                 audio = "",
                 sfx = if (mCode == "SHAKE") "惊雷轰鸣" else "环境音效",
-                visual_prompt = "9:16 vertical cinematic drama, $genre, $speaker, $dialogue"
+                visual_prompt = "8k cinematic live-action movie still, shot on ARRI Alexa 65, photorealistic Chinese actor playing $speaker, $genre, $dialogue, authentic skin pores, cinematic film lighting, no cartoon, no anime, vertical 9:16"
             )
         }
 
@@ -1327,7 +1327,7 @@ object LocalAndroidEngine {
             try {
                 val payload = mapOf(
                     "model" to "black-forest-labs/FLUX.1-schnell",
-                    "prompt" to "${shot.visual_prompt}, character ${shot.speaker}, vertical 9:16 portrait, cinematic lighting, high detail, no text",
+                    "prompt" to "8k cinematic live-action movie still, shot on ARRI Alexa 65, photorealistic Chinese actor playing ${shot.speaker}, ${shot.dialogue}, ${shot.visual_prompt}, authentic facial texture and skin pores, vertical 9:16 portrait, theatrical cinema lighting, 35mm film grain, masterpiece, no text, no anime, no cartoon",
                     "image_size" to "720x1280",
                     "num_inference_steps" to 4,
                     "seed" to charSeed
@@ -1363,7 +1363,7 @@ object LocalAndroidEngine {
             try {
                 val payload = mapOf(
                     "model" to "wanx2.1-t2i-turbo",
-                    "input" to mapOf("prompt" to "${shot.visual_prompt}, character ${shot.speaker}, vertical 9:16 cinematic drama portrait, no text"),
+                    "input" to mapOf("prompt" to "8k cinematic live-action movie still, photorealistic Chinese actor playing ${shot.speaker}, ${shot.dialogue}, ${shot.visual_prompt}, vertical 9:16 cinema drama portrait, authentic human skin pores, theatrical lighting, no text, no anime, no cartoon"),
                     "parameters" to mapOf("size" to "720*1280", "n" to 1, "seed" to charSeed)
                 )
                 val req = Request.Builder()
@@ -1419,7 +1419,7 @@ object LocalAndroidEngine {
         if (bgBitmap == null && bflKey.isNotBlank()) {
             try {
                 val payload = mapOf(
-                    "prompt" to "${shot.visual_prompt}, vertical 9:16 cinematic drama portrait, high detail",
+                    "prompt" to "8k cinematic live-action movie still, photorealistic Chinese actor playing ${shot.speaker}, ${shot.dialogue}, vertical 9:16 cinema drama portrait, authentic human skin pores, no text, no anime",
                     "width" to 720,
                     "height" to 1280,
                     "seed" to charSeed
@@ -1478,7 +1478,29 @@ object LocalAndroidEngine {
             }
         }
 
-        // 3B. 若未配置生图 Key，优先尝试从公共无门槛真实电影摄影大图源获取 720×1280 真实写实剧照
+        // 3B. 若未配置生图 Key，优先直接载入本地打包的 8K 真人电影演员实拍剧照 (ARRI Alexa 65 实拍真实黄种人演员，拒绝卡通)
+        if (bgBitmap == null) {
+            try {
+                context.assets.open("cinema_actor_default.jpg").use { inputStream ->
+                    val fullBmp = BitmapFactory.decodeStream(inputStream)
+                    if (fullBmp != null) {
+                        val isLeft = isFemaleSpeaker(shot.speaker) || shot.id % 2 == 1 || shot.speaker.contains("弟") || shot.speaker.contains("少")
+                        val sw = fullBmp.width
+                        val sh = fullBmp.height
+                        val cropBox = if (isLeft) {
+                            android.graphics.Rect(0, (sh * 0.18).toInt(), (sw * 0.68).toInt(), (sh * 0.85).toInt())
+                        } else {
+                            android.graphics.Rect((sw * 0.35).toInt(), (sh * 0.15).toInt(), sw, (sh * 0.82).toInt())
+                        }
+                        val cropped = Bitmap.createBitmap(fullBmp, cropBox.left, cropBox.top, cropBox.width(), cropBox.height())
+                        bgBitmap = Bitmap.createScaledBitmap(cropped, 720, 1280, true)
+                    }
+                }
+            } catch (_: Exception) {
+            }
+        }
+
+        // 3C. 若无内置剧照，尝试公共高清摄影图源
         if (bgBitmap == null) {
             try {
                 val seed = abs((title + shot.speaker + shot.id).hashCode())
