@@ -1637,6 +1637,14 @@ async def get_sota_status():
                 "BFL_API_KEY",
                 "行业顶级 (SOTA)"
             ),
+            "liveportrait": {
+                "name": "🎭 LivePortrait 专属演员动效工坊 (ZeroGPU A10G)",
+                "role": "角色定妆照一键转电影级眼神流转、眨眼、挑眉与自然微表情动效 (zenglian110110/liveportrait-studio)",
+                "env_key": "HF_TOKEN",
+                "configured": True,
+                "masked_key": _mask_key(os.environ.get("HF_TOKEN", "")),
+                "tier": "A10G 专属算力 (已就绪)"
+            },
             "voice": _entry(
                 "ElevenLabs Multilingual v2",
                 "人类级呼吸感情绪配音 (未配则用内置免费微软 Edge-TTS)",

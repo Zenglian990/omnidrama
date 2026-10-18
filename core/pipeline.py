@@ -10,11 +10,13 @@ try:
     from omnidrama.core.director import DirectorAgent
     from omnidrama.core.tts_engine import TTSEngine
     from omnidrama.core.compositor import VideoCompositor
+    from omnidrama.providers.liveportrait_provider import LivePortraitProvider
 except ImportError:
     from schemas.drama_schema import DramaProject, Shot, CameraMotionEnum
     from core.director import DirectorAgent
     from core.tts_engine import TTSEngine
     from core.compositor import VideoCompositor
+    from providers.liveportrait_provider import LivePortraitProvider
 
 
 class OmniDramaPipeline:
@@ -32,6 +34,7 @@ class OmniDramaPipeline:
         self.director = DirectorAgent()
         self.tts = TTSEngine()
         self.compositor = VideoCompositor(width=width, height=height, fps=fps)
+        self.liveportrait = LivePortraitProvider()
 
     def _generate_placeholder_frame(self, shot: Shot, out_path: str):
         """生成带影视排版与氛围的 2.5D 分镜基底图（用于未接入外置 GPU 生图时的极速渲染与验证）."""
@@ -61,9 +64,10 @@ class OmniDramaPipeline:
         story_text: str,
         title: str = "短剧第一集",
         genre: str = "都市热血",
-        burn_subtitles: bool = False
+        burn_subtitles: bool = False,
+        enable_liveportrait: bool = True
     ) -> Dict[str, Any]:
-        """端到端全自动运行：剧本拆解 ➔ 语音合成 ➔ 分镜生成 ➔ 2.5D 运镜渲染 ➔ 导出成片."""
+        """端到端全自动运行：剧本拆解 ➔ 语音合成 ➔ 分镜生成 ➔ 神经动效/2.5D运镜渲染 ➔ 导出成片."""
         project_dir = os.path.join(self.output_dir, title)
         shots_dir = os.path.join(project_dir, "shots")
         os.makedirs(shots_dir, exist_ok=True)
@@ -92,14 +96,39 @@ class OmniDramaPipeline:
                 self._generate_placeholder_frame(shot, img_path)
             shot.image_path = img_path
 
-            # 4. 单镜头 2.5D 动态运镜渲染
+            # 4. 单镜头渲染 (支持 LivePortrait 神经动效驱动与 2.5D 运镜自动切换)
             clip_path = os.path.join(shots_dir, f"shot_{shot.shot_id:03d}.mp4")
-            self.compositor.render_shot(
-                image_path=shot.image_path,
-                audio_path=shot.audio_path,
-                camera_motion=shot.camera_motion,
-                output_path=clip_path
-            )
+            neural_rendered = False
+
+            # 若启用神经动效，且为非旁白角色特写/对话镜头
+            if enable_liveportrait and shot.speaker not in ["旁白", "Scene", "环境"]:
+                raw_neural_video = os.path.join(shots_dir, f"neural_{shot.shot_id:03d}.mp4")
+                motion_type = "talking" if shot.dialogue else "acting"
+                res_path = self.liveportrait.animate_character(
+                    image_path=shot.image_path,
+                    output_path=raw_neural_video,
+                    motion_type=motion_type
+                )
+                if res_path and os.path.exists(res_path):
+                    try:
+                        self.compositor.render_neural_shot(
+                            video_path=res_path,
+                            audio_path=shot.audio_path,
+                            output_path=clip_path
+                        )
+                        neural_rendered = True
+                    except Exception as e:
+                        print(f"[Pipeline] Neural mux failed, fallback to 2.5D: {e}")
+                        neural_rendered = False
+
+            # 若未启用神经动效或云端降级，执行经典 2.5D 运镜渲染
+            if not neural_rendered:
+                self.compositor.render_shot(
+                    image_path=shot.image_path,
+                    audio_path=shot.audio_path,
+                    camera_motion=shot.camera_motion,
+                    output_path=clip_path
+                )
             clip_paths.append(clip_path)
 
         # 5. 生成 SRT 字幕文件

@@ -131,6 +131,44 @@ class VideoCompositor:
 
         return output_path
 
+    def render_neural_shot(
+        self,
+        video_path: str,
+        audio_path: str,
+        output_path: str
+    ) -> str:
+        """将神经动效视频与角色台词音频精确对齐并完成竖屏自适应."""
+        os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
+        duration = self.get_audio_duration(audio_path)
+        vf_expr = f"scale={self.width}:{self.height}:force_original_aspect_ratio=increase,crop={self.width}:{self.height}"
+        cmd = [
+            "ffmpeg", "-y",
+            "-stream_loop", "-1",
+            "-i", video_path,
+            "-i", audio_path,
+            "-vf", vf_expr,
+            "-map", "0:v:0",
+            "-map", "1:a:0",
+            "-c:v", "libx264",
+            "-pix_fmt", "yuv420p",
+            "-c:a", "aac",
+            "-b:a", "192k",
+            "-t", f"{duration:.3f}",
+            "-shortest",
+            output_path
+        ]
+        res = subprocess.run(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+            errors="replace"
+        )
+        if res.returncode != 0:
+            raise RuntimeError(f"FFmpeg render neural shot failed:\n{res.stderr}")
+        return output_path
+
     def render_live_actor_shot(
         self,
         image_path: str,

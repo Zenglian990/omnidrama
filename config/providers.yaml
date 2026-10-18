@@ -35,13 +35,16 @@ profiles:
       fps: 24
       motion_intensity: "cinematic_smooth"
 
-    # 4. 毫秒级唇齿音画对齐 (Neural SOTA Lip-Sync)
+    # 4. 毫秒级唇齿音画对齐与眼神微动 (Neural SOTA Lip-Sync & Face Motion)
     lipsync_engine:
-      provider: "synclabs-pro" # 备选: "liveportrait-neural"
+      provider: "liveportrait-neural" # 专属 ZeroGPU: zenglian110110/liveportrait-studio
+      space_url: "https://zenglian110110-liveportrait-studio.hf.space"
+      hardware: "zero-a10g"
       sync_mode: "audio_driven_high_fidelity"
       features:
-        - "teeth_and_tongue_modeling" # 牙齿与舌位真实生理建模
+        - "eyes_and_brow_dynamics"    # 自然眨眼与挑眉冷笑
         - "subtle_facial_wrinkles"     # 随表情变化的细微眼角/法令纹
+        - "seamless_pasteback"         # 4K高清智能贴合原画
 
     # 5. 情绪张力人类级配音 (Human-Level Voice Acting)
     audio_tts:

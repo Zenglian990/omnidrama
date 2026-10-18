@@ -12,6 +12,7 @@ from .elevenlabs_provider import ElevenLabsProvider
 from .flux_provider import FluxProProvider
 from .synclabs_provider import SyncLabsProvider
 from .suno_provider import SunoMusicProvider
+from .liveportrait_provider import LivePortraitProvider
 
 __all__ = [
     "BaseLLMProvider",
@@ -24,4 +25,5 @@ __all__ = [
     "FluxProProvider",
     "SyncLabsProvider",
     "SunoMusicProvider",
+    "LivePortraitProvider",
 ]
