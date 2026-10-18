@@ -48,13 +48,13 @@ profiles:
 
     # 5. 情绪张力人类级配音 (Human-Level Voice Acting)
     audio_tts:
-      provider: "elevenlabs" # ElevenLabs Multilingual v2 (全球最强人类呼吸声与情绪控制)
-      model: "eleven_turbo_v2_5"
+      provider: "f5-tts-neural" # 专属 ZeroGPU: zenglian110110/f5-tts-studio
+      space_url: "https://zenglian110110-f5-tts-studio.hf.space"
+      hardware: "zero-a10g"
+      fallback: "edge-tts"
       voice_settings:
-        stability: 0.65
-        similarity_boost: 0.85
-        style: 0.45
-        use_speaker_boost: true
+        model: "f5-tts-flow-matching"
+        remove_silence: false
 
     # 6. 原创影视交响乐与好莱坞拟音 (Cinematic Score & Foley)
     music_engine:

@@ -13,6 +13,7 @@ from .flux_provider import FluxProProvider
 from .synclabs_provider import SyncLabsProvider
 from .suno_provider import SunoMusicProvider
 from .liveportrait_provider import LivePortraitProvider
+from .f5_tts_provider import F5TTSProvider
 
 __all__ = [
     "BaseLLMProvider",
@@ -26,4 +27,5 @@ __all__ = [
     "SyncLabsProvider",
     "SunoMusicProvider",
     "LivePortraitProvider",
+    "F5TTSProvider",
 ]

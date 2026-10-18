@@ -1645,6 +1645,14 @@ async def get_sota_status():
                 "masked_key": _mask_key(os.environ.get("HF_TOKEN", "")),
                 "tier": "A10G 专属算力 (已就绪)"
             },
+            "f5_tts": {
+                "name": "🎙️ F5-TTS 专属声音克隆与配音工坊 (ZeroGPU A10G)",
+                "role": "男女主角零样本音色克隆、自带呼吸声与电影级情绪爆发配音 (zenglian110110/f5-tts-studio)",
+                "env_key": "HF_TOKEN",
+                "configured": True,
+                "masked_key": _mask_key(os.environ.get("HF_TOKEN", "")),
+                "tier": "A10G 专属算力 (已就绪)"
+            },
             "voice": _entry(
                 "ElevenLabs Multilingual v2",
                 "人类级呼吸感情绪配音 (未配则用内置免费微软 Edge-TTS)",

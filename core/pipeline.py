@@ -11,12 +11,14 @@ try:
     from omnidrama.core.tts_engine import TTSEngine
     from omnidrama.core.compositor import VideoCompositor
     from omnidrama.providers.liveportrait_provider import LivePortraitProvider
+    from omnidrama.providers.f5_tts_provider import F5TTSProvider
 except ImportError:
     from schemas.drama_schema import DramaProject, Shot, CameraMotionEnum
     from core.director import DirectorAgent
     from core.tts_engine import TTSEngine
     from core.compositor import VideoCompositor
     from providers.liveportrait_provider import LivePortraitProvider
+    from providers.f5_tts_provider import F5TTSProvider
 
 
 class OmniDramaPipeline:
@@ -35,6 +37,7 @@ class OmniDramaPipeline:
         self.tts = TTSEngine()
         self.compositor = VideoCompositor(width=width, height=height, fps=fps)
         self.liveportrait = LivePortraitProvider()
+        self.f5_tts = F5TTSProvider()
 
     def _generate_placeholder_frame(self, shot: Shot, out_path: str):
         """生成带影视排版与氛围的 2.5D 分镜基底图（用于未接入外置 GPU 生图时的极速渲染与验证）."""
@@ -65,9 +68,10 @@ class OmniDramaPipeline:
         title: str = "短剧第一集",
         genre: str = "都市热血",
         burn_subtitles: bool = False,
-        enable_liveportrait: bool = True
+        enable_liveportrait: bool = True,
+        enable_f5_tts: bool = True
     ) -> Dict[str, Any]:
-        """端到端全自动运行：剧本拆解 ➔ 语音合成 ➔ 分镜生成 ➔ 神经动效/2.5D运镜渲染 ➔ 导出成片."""
+        """端到端全自动运行：剧本拆解 ➔ 神经声音克隆/TTS ➔ 分镜生成 ➔ 神经动效/2.5D运镜渲染 ➔ 导出成片."""
         project_dir = os.path.join(self.output_dir, title)
         shots_dir = os.path.join(project_dir, "shots")
         os.makedirs(shots_dir, exist_ok=True)
@@ -77,18 +81,35 @@ class OmniDramaPipeline:
 
         clip_paths = []
         for shot in project.shots:
-            # 2. 语音生成
+            # 2. 语音生成 (优先使用 F5-TTS 专属声音克隆，未命中或离线时平滑降级至 Edge-TTS)
             audio_path = os.path.join(shots_dir, f"shot_{shot.shot_id:03d}.mp3")
-            voice_id, rate, pitch = self.tts.resolve_voice(shot.speaker)
-            duration = await self.tts.generate_speech(
-                text=shot.dialogue,
-                voice=voice_id,
-                output_path=audio_path,
-                rate=rate,
-                pitch=pitch
-            )
-            shot.duration_seconds = duration
-            shot.audio_path = audio_path
+            voice_rendered = False
+
+            if enable_f5_tts and shot.dialogue and shot.speaker not in ["旁白", "Scene", "环境"]:
+                cloned_audio = self.f5_tts.synthesize_character_voice(
+                    text=shot.dialogue,
+                    role=shot.speaker,
+                    output_path=audio_path
+                )
+                if cloned_audio and os.path.exists(cloned_audio):
+                    try:
+                        shot.duration_seconds = self.compositor.get_audio_duration(audio_path)
+                        shot.audio_path = audio_path
+                        voice_rendered = True
+                    except Exception:
+                        voice_rendered = False
+
+            if not voice_rendered:
+                voice_id, rate, pitch = self.tts.resolve_voice(shot.speaker)
+                duration = await self.tts.generate_speech(
+                    text=shot.dialogue,
+                    voice=voice_id,
+                    output_path=audio_path,
+                    rate=rate,
+                    pitch=pitch
+                )
+                shot.duration_seconds = duration
+                shot.audio_path = audio_path
 
             # 3. 画面资产（若未挂载生图模型，自动生成电影排版图）
             img_path = os.path.join(shots_dir, f"shot_{shot.shot_id:03d}.jpg")
