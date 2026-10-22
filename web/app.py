@@ -530,11 +530,15 @@ async def _generate_single_shot_visual(
     try:
         from omnidrama.providers.siliconflow_provider import SiliconFlowProvider
         from omnidrama.providers.dashscope_provider import DashScopeProvider
+        from omnidrama.providers.liveportrait_provider import LivePortraitProvider
+        from omnidrama.providers.f5_tts_provider import F5TTSProvider
         from omnidrama.providers.flux_provider import FluxProProvider
         from omnidrama.providers.pexels_provider import PexelsProvider
     except ImportError:
         from providers.siliconflow_provider import SiliconFlowProvider
         from providers.dashscope_provider import DashScopeProvider
+        from providers.liveportrait_provider import LivePortraitProvider
+        from providers.f5_tts_provider import F5TTSProvider
         from providers.flux_provider import FluxProProvider
         from providers.pexels_provider import PexelsProvider
 
@@ -926,6 +930,7 @@ async def _run_production_pipeline(req: Optional[RenderRequest]):
         eleven_provider = ElevenLabsProvider(api_key=eleven_key) if eleven_key else None
         ds_tts_provider = DashScopeProvider(api_key=ds_key) if ds_key else None
         sf_tts_provider = SiliconFlowProvider(api_key=sf_key) if sf_key else None
+        f5_provider = F5TTSProvider()
 
         tts_tool_name = "elevenlabs_tts" if eleven_key else ("edge_tts")
         decision_log.record(
@@ -956,6 +961,20 @@ async def _run_production_pipeline(req: Optional[RenderRequest]):
             cost_tracker.reserve(c_tts)
 
             synthesized = False
+            if not synthesized and f5_provider and speaker not in ["旁白", "Scene", "环境"]:
+                try:
+                    cloned_out = await asyncio.to_thread(
+                        f5_provider.synthesize_character_voice,
+                        dialogue,
+                        speaker,
+                        audio_out
+                    )
+                    if cloned_out and os.path.exists(cloned_out):
+                        synthesized = True
+                        RENDER_STATE["logs"].append(f"🎙️ [{_now_str()}] 第 {sid:02d} 镜【{speaker}】F5-TTS ZeroGPU A10G 专属声音克隆完成！")
+                except Exception:
+                    pass
+
             if eleven_provider:
                 try:
                     el_voice_id = "pNInz6obpgDQGcFmaJgB" if "Xiaoxiao" not in voice_code and "Xiaohan" not in voice_code else "21m00Tcm4TlvDq8ikWAM"
@@ -1214,6 +1233,19 @@ async def _run_production_pipeline(req: Optional[RenderRequest]):
         RENDER_STATE["is_rendering"] = False
         RENDER_STATE["error"] = str(e)
         RENDER_STATE["logs"].append(f"❌ [{_now_str()}] 渲染发生异常: {str(e)}")
+
+
+@app.post("/api/project/render-reset")
+async def reset_render_pipeline():
+    """强制重置制片机房渲染状态."""
+    global RENDER_STATE
+    RENDER_STATE["is_rendering"] = False
+    RENDER_STATE["progress"] = 0
+    RENDER_STATE["step_index"] = 0
+    RENDER_STATE["error"] = None
+    RENDER_STATE["current_step"] = "空闲待命"
+    RENDER_STATE["logs"] = [f"🔄 [{_now_str()}] 制片机房状态已手动重置就绪。"]
+    return {"status": "ok", "message": "渲染状态已重置", "state": RENDER_STATE}
 
 
 @app.post("/api/project/render")

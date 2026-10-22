@@ -141,8 +141,8 @@ fun ProductionStudioDialog(
                 return@launch
             }
 
-            // 2. 尝试向远端下发任务 (限时 10 秒，避免网络握手导致过早回退)
-            val started = withTimeoutOrNull(10000L) {
+            // 2. 尝试向远端下发任务 (限时 25 秒，保证与远端 A10G 机房稳定握手)
+            val started = withTimeoutOrNull(25000L) {
                 try {
                     repo.triggerRender(serverUrl, project)
                 } catch (_: Exception) {
@@ -155,7 +155,7 @@ fun ProductionStudioDialog(
                 return@launch
             }
 
-            // 3. 轮询远端状态；若远端空闲未开工 (progress=0 && !is_rendering) 或在某进度卡死超过 10 秒，立即手机本地接管！
+            // 3. 轮询远端状态；耐心等待云端 A10G 算力（LivePortrait + F5-TTS）渲染完成
             var failCount = 0
             var idleCount = 0
             var lastProgress = -1
@@ -168,8 +168,8 @@ fun ProductionStudioDialog(
                     failCount = 0
                     if (status.progress == lastProgress && status.is_rendering) {
                         stuckCount++
-                        // 若远端任务卡在某个百分比（如 5% 云端无常驻 CPU 配额挂起）超过 8 次（约 10 秒），无缝切换手机硬件秒级渲染
-                        if (stuckCount >= 8) {
+                        // 云端 A10G 神经动效与声音克隆渲染约需 20~40 秒，放宽至 70 次轮询（约 85 秒），防止提前跳回手机本地
+                        if (stuckCount >= 70) {
                             runPhoneHardwareRender()
                             finished = true
                             break
@@ -188,7 +188,7 @@ fun ProductionStudioDialog(
                         isComplete = true
                     } else if (!status.is_rendering && status.progress == 0) {
                         idleCount++
-                        if (idleCount >= 5) {
+                        if (idleCount >= 10) {
                             runPhoneHardwareRender()
                             finished = true
                         }
@@ -197,7 +197,7 @@ fun ProductionStudioDialog(
                     }
                 } else {
                     failCount++
-                    if (failCount >= 4) {
+                    if (failCount >= 15) {
                         runPhoneHardwareRender()
                         finished = true
                     }
