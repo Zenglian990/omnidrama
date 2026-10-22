@@ -129,46 +129,68 @@ fun ProductionStudioDialog(
         }
     }
 
-    LaunchedEffect(Unit) {
-        renderJob = launch {
-            // 1. 若未配置公网服务器，直接调用手机原生硬件引擎
+    fun startCloudRender() {
+        renderJob?.cancel()
+        renderJob = scope.launch {
+            hasError = false
+            isComplete = false
+
             val isRemotePossible = serverUrl.isNotBlank() &&
                 !serverUrl.contains("localhost") &&
                 !serverUrl.contains("127.0.0.1")
 
             if (!isRemotePossible) {
-                runPhoneHardwareRender()
-                return@launch
-            }
-
-            // 2. 尝试向远端下发任务 (限时 25 秒，保证与远端 A10G 机房稳定握手)
-            val started = withTimeoutOrNull(25000L) {
-                try {
-                    repo.triggerRender(serverUrl, project)
-                } catch (_: Exception) {
-                    false
-                }
-            } ?: false
-
-            if (!started) {
                 val logsList = renderStatus.logs.toMutableList()
-                logsList.add("⚠️ 无法连接到远程机房或机房正忙，请检查网络后重试。")
+                logsList.add("❌ 请在右上角设置中配置远程云端机房地址！")
                 renderStatus = renderStatus.copy(
                     is_rendering = false,
-                    current_step = "❌ 远程机房未响应，请检查云端状态",
+                    current_step = "❌ 未配置云端机房地址",
                     logs = logsList.toList()
                 )
                 hasError = true
                 return@launch
             }
 
+            // 1. 先探测云端状态：若已渲染完成（如云端后台已跑完），直接秒显成片！
+            val initialStatus = try { repo.getRenderStatus(serverUrl) } catch (_: Exception) { null }
+            if (initialStatus != null && initialStatus.progress >= 100 && !initialStatus.is_rendering) {
+                renderStatus = initialStatus
+                isComplete = true
+                return@launch
+            }
+
+            // 2. 若云端未在渲染中，下发开始制作指令
+            if (initialStatus == null || !initialStatus.is_rendering) {
+                val started = withTimeoutOrNull(25000L) {
+                    try {
+                        repo.triggerRender(serverUrl, project)
+                    } catch (_: Exception) {
+                        false
+                    }
+                } ?: false
+
+                if (!started) {
+                    val doubleCheck = try { repo.getRenderStatus(serverUrl) } catch (_: Exception) { null }
+                    if (doubleCheck == null || (!doubleCheck.is_rendering && doubleCheck.progress == 0)) {
+                        val logsList = renderStatus.logs.toMutableList()
+                        logsList.add("⚠️ 无法连接到远程机房或机房正忙，请检查网络后重试。")
+                        renderStatus = renderStatus.copy(
+                            is_rendering = false,
+                            current_step = "❌ 远程机房未响应，请检查云端状态",
+                            logs = logsList.toList()
+                        )
+                        hasError = true
+                        return@launch
+                    }
+                }
+            }
+
             // 3. 轮询远端状态；耐心等待云端 A10G 算力（LivePortrait + F5-TTS）渲染完成（绝不强行切换回手机本地）
             var failCount = 0
-            var idleCount = 0
             var lastProgress = -1
             var stuckCount = 0
             var finished = false
-            while (!finished && !usingLocalEngine) {
+            while (!finished) {
                 delay(1200)
                 val status = repo.getRenderStatus(serverUrl)
                 if (status != null) {
@@ -199,19 +221,6 @@ fun ProductionStudioDialog(
                         renderStatus = status
                         finished = true
                         isComplete = true
-                    } else if (!status.is_rendering && status.progress == 0) {
-                        idleCount++
-                        if (idleCount >= 15) {
-                            val logsList = renderStatus.logs.toMutableList()
-                            logsList.add("⚠️ 云端机房空闲待命中，可重新点击渲染。")
-                            renderStatus = renderStatus.copy(
-                                is_rendering = false,
-                                current_step = "⚠️ 云端机房空闲待命",
-                                logs = logsList.toList()
-                            )
-                            hasError = true
-                            finished = true
-                        }
                     } else {
                         renderStatus = status
                     }
@@ -231,6 +240,10 @@ fun ProductionStudioDialog(
                 }
             }
         }
+    }
+
+    LaunchedEffect(Unit) {
+        startCloudRender()
     }
 
     val handleDismiss = {
@@ -368,26 +381,7 @@ fun ProductionStudioDialog(
 
                 Spacer(modifier = Modifier.height(10.dp))
 
-                // 如果还在等待远端，显示可立即手动切换为手机本地压制按钮
-                if (!isComplete && !hasError && !usingLocalEngine) {
-                    Button(
-                        onClick = {
-                            scope.launch {
-                                renderJob?.cancel()
-                                runPhoneHardwareRender()
-                            }
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1E293B)),
-                        shape = RoundedCornerShape(8.dp),
-                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Icon(imageVector = Icons.Default.PhoneAndroid, contentDescription = null, tint = Color(0xFF38BDF8), modifier = Modifier.size(14.dp))
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text("⚡ 立即切换为手机独立硬件极速压制", color = Color(0xFF38BDF8), fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                    }
-                    Spacer(modifier = Modifier.height(8.dp))
-                }
+
 
                 // 5大流水线工序卡片
                 Text(
@@ -538,48 +532,17 @@ fun ProductionStudioDialog(
                         modifier = Modifier.fillMaxWidth(),
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        Row(
+                        Button(
+                            onClick = {
+                                startCloudRender()
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00F2FE)),
                             modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            shape = RoundedCornerShape(10.dp)
                         ) {
-                            Button(
-                                onClick = {
-                                    hasError = false
-                                    isComplete = false
-                                    renderJob?.cancel()
-                                    renderJob = scope.launch {
-                                        val started = withTimeoutOrNull(25000L) {
-                                            try { repo.triggerRender(serverUrl, project) } catch (_: Exception) { false }
-                                        } ?: false
-                                        if (started) {
-                                            renderStatus = renderStatus.copy(is_rendering = true, progress = 5, current_step = "已重新连接云端制片机房...")
-                                        } else {
-                                            hasError = true
-                                        }
-                                    }
-                                },
-                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00F2FE)),
-                                modifier = Modifier.weight(1f),
-                                shape = RoundedCornerShape(10.dp)
-                            ) {
-                                Icon(imageVector = Icons.Default.Refresh, contentDescription = null, tint = Color(0xFF0C101A), modifier = Modifier.size(16.dp))
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text("🔄 重试云端渲染", color = Color(0xFF0C101A), fontWeight = FontWeight.Bold, fontSize = 12.sp)
-                            }
-
-                            Button(
-                                onClick = {
-                                    hasError = false
-                                    scope.launch {
-                                        runPhoneHardwareRender()
-                                    }
-                                },
-                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF334155)),
-                                modifier = Modifier.weight(1f),
-                                shape = RoundedCornerShape(10.dp)
-                            ) {
-                                Text("📱 备用: 本地压制", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 12.sp)
-                            }
+                            Icon(imageVector = Icons.Default.Refresh, contentDescription = null, tint = Color(0xFF0C101A), modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("🔄 重新连接并同步云端渲染进度", color = Color(0xFF0C101A), fontWeight = FontWeight.Bold, fontSize = 13.sp)
                         }
 
                         Button(
