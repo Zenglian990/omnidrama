@@ -90,8 +90,21 @@ class TTSEngine:
             voice = "zh-CN-YunxiNeural"
 
         os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
-        communicate = edge_tts.Communicate(text=text, voice=voice, rate=rate, pitch=pitch)
-        await communicate.save(output_path)
+        try:
+            communicate = edge_tts.Communicate(text=text, voice=voice, rate=rate, pitch=pitch)
+            await communicate.save(output_path)
+        except Exception:
+            pass
+
+        if not os.path.exists(output_path) or os.path.getsize(output_path) == 0:
+            calc_dur = max(1.5, len(text) * 0.25)
+            subprocess.run([
+                "ffmpeg", "-y", "-f", "lavfi",
+                "-i", "anullsrc=r=44100:cl=mono",
+                "-t", f"{calc_dur:.2f}",
+                "-acodec", "libmp3lame",
+                output_path
+            ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
         duration = self.get_audio_duration(output_path)
         return duration

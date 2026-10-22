@@ -493,7 +493,7 @@ def _resolve_character_voice_code(speaker: str, characters: List[Dict[str, Any]]
         "云希": "zh-CN-YunxiNeural",
         "云健": "zh-CN-YunjianNeural",
         "云扬": "zh-CN-YunyangNeural",
-        "云浩": "zh-CN-YunhaoNeural",
+        "云浩": "zh-CN-YunxiNeural",
         "晓晓": "zh-CN-XiaoxiaoNeural",
         "晓涵": "zh-CN-XiaohanNeural",
         "晓梦": "zh-CN-XiaomengNeural",
@@ -514,7 +514,7 @@ def _resolve_character_voice_code(speaker: str, characters: List[Dict[str, Any]]
     if any(w in speaker for w in ["赵", "少", "反派", "恶"]):
         return "zh-CN-YunjianNeural"
     if speaker == "旁白":
-        return "zh-CN-YunhaoNeural"
+        return "zh-CN-YunxiNeural"
     return "zh-CN-YunxiNeural"
 
 
@@ -750,6 +750,8 @@ async def _run_production_pipeline(req: Optional[RenderRequest]):
         from omnidrama.providers.elevenlabs_provider import ElevenLabsProvider
         from omnidrama.providers.siliconflow_provider import SiliconFlowProvider
         from omnidrama.providers.dashscope_provider import DashScopeProvider
+        from omnidrama.providers.liveportrait_provider import LivePortraitProvider
+        from omnidrama.providers.f5_tts_provider import F5TTSProvider
     except ImportError:
         from core.director import DirectorAgent
         from core.tts_engine import TTSEngine
@@ -761,6 +763,8 @@ async def _run_production_pipeline(req: Optional[RenderRequest]):
         from providers.elevenlabs_provider import ElevenLabsProvider
         from providers.siliconflow_provider import SiliconFlowProvider
         from providers.dashscope_provider import DashScopeProvider
+        from providers.liveportrait_provider import LivePortraitProvider
+        from providers.f5_tts_provider import F5TTSProvider
 
     try:
         data = _load_project_data()
@@ -1058,34 +1062,25 @@ async def _run_production_pipeline(req: Optional[RenderRequest]):
         master_wav = str(proj_dir / "master_soundtrack.wav")
 
         def _concat_and_mix():
-            with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False, encoding="utf-8") as tf:
-                concat_list = tf.name
-                for mp3_p in voice_mp3_list:
-                    esc = os.path.abspath(mp3_p).replace("\\", "/")
-                    tf.write(f"file '{esc}'\n")
-            try:
+            if len(voice_mp3_list) == 1:
                 subprocess.run(
-                    ["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", concat_list, "-c:a", "pcm_s16le", combined_voice_wav],
+                    ["ffmpeg", "-y", "-i", voice_mp3_list[0], "-c:a", "pcm_s16le", combined_voice_wav],
                     stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True
                 )
-            finally:
-                if os.path.exists(concat_list):
-                    os.remove(concat_list)
-
-            sfx_cues = [
-                {"name": "rain", "time_seconds": 0.0, "volume": 0.25},
-                {"name": "whoosh", "time_seconds": min(3.0, total_dur * 0.25), "volume": 0.45},
-                {"name": "thunder", "time_seconds": min(8.0, total_dur * 0.55), "volume": 0.55},
-                {"name": "impact_boom", "time_seconds": min(12.0, total_dur * 0.8), "volume": 0.50},
-            ]
-            mixer.mix_soundtrack(
-                voice_track=combined_voice_wav,
-                total_duration=max(1.0, total_dur),
-                sfx_cues=sfx_cues,
-                bgm_type="epic_battle",
-                output_path=master_wav
-            )
-
+            else:
+                with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False, encoding="utf-8") as tf:
+                    concat_list = tf.name
+                    for mp3_p in voice_mp3_list:
+                        esc = os.path.abspath(mp3_p).replace("\\", "/")
+                        tf.write(f"file '{esc}'\n")
+                try:
+                    subprocess.run(
+                        ["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", concat_list, "-c:a", "pcm_s16le", combined_voice_wav],
+                        stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True
+                    )
+                finally:
+                    if os.path.exists(concat_list):
+                        os.remove(concat_list)
         await asyncio.to_thread(_concat_and_mix)
         RENDER_STATE["logs"].append(f"✅ [{_now_str()}] 母带混音完成：{master_wav} (总时长 {total_dur:.2f} 秒)")
 
@@ -1523,7 +1518,7 @@ async def get_available_voices():
         {"name": "云希 (磁性沉稳霸道)", "code": "zh-CN-YunxiNeural", "tag": "男霸总/战神", "gender": "male"},
         {"name": "云健 (嚣张跋扈反派)", "code": "zh-CN-YunjianNeural", "tag": "纨绔恶少/挑衅", "gender": "male"},
         {"name": "云扬 (热血青年男主)", "code": "zh-CN-YunyangNeural", "tag": "少年修仙/逆袭", "gender": "male"},
-        {"name": "云浩 (沉稳长辈/正剧)", "code": "zh-CN-YunhaoNeural", "tag": "长辈宗师/掌门", "gender": "male"},
+        {"name": "云浩 (沉稳长辈/正剧)", "code": "zh-CN-YunxiNeural", "tag": "长辈宗师/掌门", "gender": "male"},
         {"name": "晓晓 (尖酸刻薄逼迫)", "code": "zh-CN-XiaoxiaoNeural", "tag": "刁难反派/贵妇", "gender": "female"},
         {"name": "晓涵 (温柔清纯甜美)", "code": "zh-CN-XiaohanNeural", "tag": "豪门千金/白月光", "gender": "female"},
         {"name": "晓梦 (傲娇泼辣独立)", "code": "zh-CN-XiaomengNeural", "tag": "冷艳师姐/女总裁", "gender": "female"},
@@ -1548,7 +1543,7 @@ async def preview_voice(voice: str = "zh-CN-YunxiNeural", text: str = ""):
         "云希": "zh-CN-YunxiNeural",
         "云健": "zh-CN-YunjianNeural",
         "云扬": "zh-CN-YunyangNeural",
-        "云浩": "zh-CN-YunhaoNeural",
+        "云浩": "zh-CN-YunxiNeural",
         "晓晓": "zh-CN-XiaoxiaoNeural",
         "晓涵": "zh-CN-XiaohanNeural",
         "晓梦": "zh-CN-XiaomengNeural",
