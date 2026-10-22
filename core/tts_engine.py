@@ -16,6 +16,7 @@ import edge_tts.constants
 import edge_tts.communicate
 import edge_tts.drm
 from datetime import timezone as _tz
+from email.utils import parsedate_to_datetime as _parsedate_to_datetime
 try:
     from omnidrama.schemas.drama_schema import Shot
 except ImportError:

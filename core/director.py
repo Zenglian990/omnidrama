@@ -246,7 +246,10 @@ class DirectorAgent:
         # 1. 优先尝试硅基流动 SiliconFlow (国内免绑卡，含免费 Qwen2.5 与 DeepSeek-V3)
         if siliconflow_key:
             try:
-                from omnidrama.providers.siliconflow_provider import SiliconFlowProvider
+                try:
+                    from providers.siliconflow_provider import SiliconFlowProvider
+                except ImportError:
+                    from omnidrama.providers.siliconflow_provider import SiliconFlowProvider
                 sf = SiliconFlowProvider(api_key=siliconflow_key)
                 content_str, engine_name = sf.chat_completion(DIRECTOR_SYSTEM_PROMPT, user_prompt)
                 parsed = self._extract_json(content_str)

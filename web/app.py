@@ -15,11 +15,21 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, FileResponse
 from pydantic import BaseModel
 
-BASE_DIR = Path(__file__).parent.parent
+import types
+
+BASE_DIR = Path(__file__).parent.parent.resolve()
 if str(BASE_DIR) not in sys.path:
     sys.path.insert(0, str(BASE_DIR))
 if str(BASE_DIR.parent) not in sys.path:
     sys.path.insert(0, str(BASE_DIR.parent))
+
+# 彻底根治 Docker/Cloud Run 容器中由于根目录挂载导致的 No module named 'omnidrama'：
+# 注册虚拟 omnidrama 包对象，让所有 'from omnidrama.xxx' 随时随地直接解析至根工程目录
+if 'omnidrama' not in sys.modules:
+    _omnidrama_mod = types.ModuleType('omnidrama')
+    _omnidrama_mod.__path__ = [str(BASE_DIR)]
+    _omnidrama_mod.__file__ = str(BASE_DIR / '__init__.py')
+    sys.modules['omnidrama'] = _omnidrama_mod
 OUTPUT_DIR = BASE_DIR / "output"
 WEB_DIR = BASE_DIR / "web"
 ASSETS_DIR = BASE_DIR / "assets"

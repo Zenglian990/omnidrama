@@ -19,6 +19,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 # 复制代码
 COPY . .
 
+# 建立符号链接，双重保险让 python -m 和常规 import 无论何种姿态都能找到 omnidrama
+RUN ln -sf /app /app/omnidrama
+
 # 暴露端口 (Google Cloud Run 标准 8080)
 EXPOSE 8080
 
