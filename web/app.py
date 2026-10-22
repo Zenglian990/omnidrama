@@ -830,6 +830,42 @@ async def _run_production_pipeline(req: Optional[RenderRequest]):
         _load_env_file()
 
         RENDER_STATE["is_rendering"] = True
+
+        # 本地函数作用域安全导入核心制片引擎
+        try:
+            from core.cost_tracker import CostTracker, DecisionLog
+        except Exception:
+            from omnidrama.core.cost_tracker import CostTracker, DecisionLog
+
+        try:
+            from schemas.drama_schema import CameraMotionEnum, Shot, ShotScaleEnum
+        except Exception:
+            from omnidrama.schemas.drama_schema import CameraMotionEnum, Shot, ShotScaleEnum
+
+        try:
+            from core.quality_gate import auto_optimize_storyboard, verify_rendered_video
+        except Exception:
+            from omnidrama.core.quality_gate import auto_optimize_storyboard, verify_rendered_video
+
+        try:
+            from core.director import DirectorAgent
+        except Exception:
+            from omnidrama.core.director import DirectorAgent
+
+        try:
+            from core.tts_engine import TTSEngine
+        except Exception:
+            from omnidrama.core.tts_engine import TTSEngine
+
+        try:
+            from core.audio_mixer import AudioMixer
+        except Exception:
+            from omnidrama.core.audio_mixer import AudioMixer
+
+        try:
+            from core.compositor import VideoCompositor
+        except Exception:
+            from omnidrama.core.compositor import VideoCompositor
         RENDER_STATE["error"] = None
         RENDER_STATE["progress"] = 5
         RENDER_STATE["step_index"] = 1
