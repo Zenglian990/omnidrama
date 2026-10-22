@@ -73,31 +73,34 @@ _load_env_file()
 app = FastAPI(title="曾练AI短剧创作 (OmniDrama Studio)", version="1.5.0")
 
 try:
-    from omnidrama.core.director import DirectorAgent
-    from omnidrama.core.tts_engine import TTSEngine
-    from omnidrama.core.audio_mixer import AudioMixer
-    from omnidrama.core.compositor import VideoCompositor
-    from omnidrama.core.quality_gate import auto_optimize_storyboard, verify_rendered_video
-    from omnidrama.core.cost_tracker import CostTracker, DecisionLog
-    from omnidrama.schemas.drama_schema import CameraMotionEnum, Shot, ShotScaleEnum
-    from omnidrama.providers.elevenlabs_provider import ElevenLabsProvider
-    from omnidrama.providers.siliconflow_provider import SiliconFlowProvider
-    from omnidrama.providers.dashscope_provider import DashScopeProvider
-    from omnidrama.providers.liveportrait_provider import LivePortraitProvider
-    from omnidrama.providers.f5_tts_provider import F5TTSProvider
-except ImportError:
-    from core.director import DirectorAgent
-    from core.tts_engine import TTSEngine
-    from core.audio_mixer import AudioMixer
-    from core.compositor import VideoCompositor
-    from core.quality_gate import auto_optimize_storyboard, verify_rendered_video
-    from core.cost_tracker import CostTracker, DecisionLog
-    from schemas.drama_schema import CameraMotionEnum, Shot, ShotScaleEnum
-    from providers.elevenlabs_provider import ElevenLabsProvider
-    from providers.siliconflow_provider import SiliconFlowProvider
-    from providers.dashscope_provider import DashScopeProvider
-    from providers.liveportrait_provider import LivePortraitProvider
-    from providers.f5_tts_provider import F5TTSProvider
+    try:
+        from omnidrama.core.director import DirectorAgent
+        from omnidrama.core.tts_engine import TTSEngine
+        from omnidrama.core.audio_mixer import AudioMixer
+        from omnidrama.core.compositor import VideoCompositor
+        from omnidrama.core.quality_gate import auto_optimize_storyboard, verify_rendered_video
+        from omnidrama.core.cost_tracker import CostTracker, DecisionLog
+        from omnidrama.schemas.drama_schema import CameraMotionEnum, Shot, ShotScaleEnum
+        from omnidrama.providers.elevenlabs_provider import ElevenLabsProvider
+        from omnidrama.providers.siliconflow_provider import SiliconFlowProvider
+        from omnidrama.providers.dashscope_provider import DashScopeProvider
+        from omnidrama.providers.liveportrait_provider import LivePortraitProvider
+        from omnidrama.providers.f5_tts_provider import F5TTSProvider
+    except Exception:
+        from core.director import DirectorAgent
+        from core.tts_engine import TTSEngine
+        from core.audio_mixer import AudioMixer
+        from core.compositor import VideoCompositor
+        from core.quality_gate import auto_optimize_storyboard, verify_rendered_video
+        from core.cost_tracker import CostTracker, DecisionLog
+        from schemas.drama_schema import CameraMotionEnum, Shot, ShotScaleEnum
+        from providers.elevenlabs_provider import ElevenLabsProvider
+        from providers.siliconflow_provider import SiliconFlowProvider
+        from providers.dashscope_provider import DashScopeProvider
+        from providers.liveportrait_provider import LivePortraitProvider
+        from providers.f5_tts_provider import F5TTSProvider
+except Exception as _e:
+    print(f"Notice: Deferred module load on container startup: {_e}")
 
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 ASSETS_DIR.mkdir(parents=True, exist_ok=True)
