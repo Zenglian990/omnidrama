@@ -4,6 +4,8 @@
 一键打包导出为国内短剧团队标准使用的《剪映》原生草稿工程 (draft_content.json)，
 方便创作者在剪映中直接打开进行二次调色、特效叠加与精修剪辑。
 """
+from __future__ import annotations
+
 import os
 import json
 import uuid

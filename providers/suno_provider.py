@@ -3,6 +3,8 @@
 Suno v3.5 是全球顶级 AI 音乐生成大模型，能够根据短剧剧本的情绪曲线，
 自动生成好莱坞汉斯·季默风格的交响乐、紧张悬疑低音氛围 (Drone) 以及高潮战歌。
 """
+from __future__ import annotations
+
 import os
 import time
 import requests

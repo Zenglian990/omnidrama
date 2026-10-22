@@ -1,4 +1,6 @@
 """番茄小说 (fanqienovel.com) 实时榜单抓取与书籍/章节链接解析器."""
+from __future__ import annotations
+
 import re
 from typing import Any, Dict, List
 import requests

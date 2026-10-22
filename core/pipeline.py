@@ -1,4 +1,6 @@
 """OmniDrama 端到端导演与视频合成总管线 (Pipeline)."""
+from __future__ import annotations
+
 import os
 import asyncio
 from pathlib import Path

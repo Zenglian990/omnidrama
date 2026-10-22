@@ -3,6 +3,8 @@
 SyncLabs (Sync.so) 是全球公认最先进的音频驱动面部与口型重塑大模型，
 具备真实牙齿、舌位生理运动对齐，彻底告别传统 2D 变形与模糊 Wav2Lip。
 """
+from __future__ import annotations
+
 import os
 import time
 import requests

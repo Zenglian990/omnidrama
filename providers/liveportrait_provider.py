@@ -4,6 +4,8 @@
 为短剧角色定妆照注入电影级眼神流转、眨眼、挑眉与自然对白微动作。
 具备自动降级与重试机制，若云端无网络或排队，优雅回退至本地离线渲染引擎。
 """
+from __future__ import annotations
+
 
 import os
 import shutil

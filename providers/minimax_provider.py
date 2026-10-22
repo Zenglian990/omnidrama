@@ -3,6 +3,8 @@
 MiniMax Video-01 是目前全球公认电影质感最强、人物面部微表情、毛孔与眼神光最为细腻的视频模型。
 专用于生成主角情感爆发、面部特写与电影级视听镜头。
 """
+from __future__ import annotations
+
 import os
 import time
 import requests

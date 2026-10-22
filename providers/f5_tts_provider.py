@@ -4,6 +4,8 @@
 为短剧男女主角实现零样本 (Zero-Shot) 极速音色克隆与电影级戏剧张力情感配音。
 支持男主霸总、女主清澈等角色原声锚点，具备自动重试与离线降级能力。
 """
+from __future__ import annotations
+
 
 import os
 import shutil

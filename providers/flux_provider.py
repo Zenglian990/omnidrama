@@ -3,6 +3,8 @@
 FLUX.1 Pro (由 Black Forest Labs 出品) 是目前全球摄影级质感最强、人体结构最准确、
 材质光影与多角色特征还原最极致的文生图大模型，代表当今商业影视原画的工业巅峰。
 """
+from __future__ import annotations
+
 import os
 import time
 import requests

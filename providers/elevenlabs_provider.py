@@ -3,6 +3,8 @@
 ElevenLabs 是全球公认最强的情感语音合成大模型，拥有真实的呼吸喘息、
 轻蔑冷笑、愤怒咆哮、悲伤抽泣与微表情叹息，是好莱坞影视级声音标准。
 """
+from __future__ import annotations
+
 import os
 import requests
 from typing import Optional, Dict, Any

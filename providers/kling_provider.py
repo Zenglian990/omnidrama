@@ -3,6 +3,8 @@
 快手可灵 2.0 Pro 是目前国内短剧工业化制作的绝对霸主，擅长大肢体动作、
 大幅度打斗对抗、物理碰撞及运镜轨迹控制 (Camera Controls)。
 """
+from __future__ import annotations
+
 import json
 import os
 import time

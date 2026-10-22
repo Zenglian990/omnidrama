@@ -5,6 +5,8 @@
 2. 自然眨眼机制 (Blinking Dynamics)：模拟人类每 2.5~3.5 秒的自主眨眼；
 3. 真实呼吸感与微表情微晃 (Breathing & Sway)：头部与身体具有微小沉浸感呼吸起伏。
 """
+from __future__ import annotations
+
 import os
 import subprocess
 import numpy as np

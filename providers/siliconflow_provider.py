@@ -4,6 +4,8 @@
 1. 免费/高速文生图：支持 `black-forest-labs/FLUX.1-schnell` (免费) 与 `Kwai-Kolors/Kolors` (可图免费) 实时生成每镜独立分镜画面。
 2. 剧本拆解大模型：支持 `deepseek-ai/DeepSeek-V3` 及免费模型 `Qwen/Qwen2.5-7B-Instruct`。
 """
+from __future__ import annotations
+
 import os
 import base64
 import requests

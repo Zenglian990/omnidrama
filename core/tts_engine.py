@@ -1,4 +1,6 @@
 """OmniDrama 语音与字幕引擎 (基于微软 Edge-TTS)."""
+from __future__ import annotations
+
 import asyncio
 import os
 import json

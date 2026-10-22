@@ -3,6 +3,8 @@
 支持在没有付费 API 时安全降级使用本地/离线/轻量模拟通道，
 当后续配置商业 Key 时，无需改动任何业务代码即可热拔插接入顶级视频模型。
 """
+from __future__ import annotations
+
 from abc import ABC, abstractmethod
 from typing import Dict, Any, List, Optional
 

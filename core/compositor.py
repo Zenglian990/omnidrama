@@ -1,9 +1,12 @@
 """OmniDrama 2.5D 影视运镜与双层字幕视频合成器 (基于 FFmpeg - 运镜与字幕分离架构)."""
+from __future__ import annotations
+
 import os
 import subprocess
 import json
 import tempfile
 from pathlib import Path
+from typing import Optional, List, Dict, Any, Tuple
 try:
     from omnidrama.schemas.drama_schema import CameraMotionEnum
 except ImportError:

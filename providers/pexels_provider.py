@@ -3,6 +3,8 @@
 用户只需在 https://www.pexels.com/api/ 免费注册即可获得 API Key（0元、免绑卡），
 系统可根据分镜关键词自动检索并下载 9:16 竖屏高清实拍动态视频或高清剧照。
 """
+from __future__ import annotations
+
 import os
 import requests
 from typing import Optional

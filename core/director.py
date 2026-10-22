@@ -2,6 +2,8 @@
 
 负责调用真实大模型 API (SiliconFlow / DeepSeek / Kimi / Gemini / Claude) 将小说文本转化为结构化剧本与分镜资产。
 """
+from __future__ import annotations
+
 import os
 import re
 import json

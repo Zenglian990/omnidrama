@@ -3,6 +3,8 @@
 支持长篇小说自动切集、跨剧集角色资产/声线永久一致性锁定、
 剧集状态追踪 (草稿 -> 编剧 -> 分镜 -> 成片 -> 剪映工程) 以及多语言出海短剧配置。
 """
+from __future__ import annotations
+
 import os
 import json
 import re

@@ -5,6 +5,8 @@ Track 1: 人声台词轨 (Voice)
 Track 2: 拟音音效轨 (SFX Foley - 暴雨、惊雷、重击、刀剑)
 Track 3: 电影原声配乐轨 (BGM - 悬疑铺垫、绝地反击战歌，含说话自动避让 Ducking)
 """
+from __future__ import annotations
+
 import os
 import subprocess
 from pathlib import Path
