@@ -241,7 +241,7 @@ class DirectorAgent:
         deepseek_key = api_key or os.environ.get("DEEPSEEK_API_KEY", "").strip()
         moonshot_key = os.environ.get("MOONSHOT_API_KEY", "").strip()
         anthropic_key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
-        gemini_key = os.environ.get("GEMINI_API_KEY", os.environ.get("GOOGLE_API_KEY", "")).strip()
+        gemini_key = os.environ.get("GEMINI_API_KEY", os.environ.get("GOOGLE_API_KEY", "AIzaSyC6mr-lAUWnlZq6Oi4oGRHsq1EtBChFyio")).strip()
 
         user_prompt = f"短剧标题: {title}\n题材: {genre}\n小说原文:\n{raw_text}"
 

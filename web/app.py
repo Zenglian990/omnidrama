@@ -420,8 +420,8 @@ def _pick_source_manga_image(speaker: str, shot_id: int) -> Path:
     proc_dir = ASSETS_DIR / "procedural"
     proc_dir.mkdir(parents=True, exist_ok=True)
 
-    # 先检查 assets 或已有 output 中是否有可用原画
-    for jpg in list(ASSETS_DIR.glob("*.jpg")) + list((OUTPUT_DIR / "至尊龙王归位" / "shots").glob("*_raw.jpg")):
+    # 先检查 assets 中是否有全局通用母图
+    for jpg in list(ASSETS_DIR.glob("*.jpg")):
         if jpg.exists() and jpg.stat().st_size > 5000:
             return jpg
 
@@ -789,6 +789,24 @@ async def _generate_single_shot_visual(
                         logs_list.append(f"🎬 [{_now_str()}] 第 {sid:02d} 镜：可灵 Kling 2.0 图生视频成功！")
         except Exception:
             pass
+
+    # 3.5 自动使用完全免费且免 Key 的官方 Pollinations FLUX.1 生成 8K 真实电影剧照
+    if not generated_ai_img:
+        try:
+            import urllib.parse
+            import requests as _req
+            safe_p = visual_prompt or f"8k cinematic vertical movie still, {speaker}, {dialogue}, ARRI Alexa 65, masterpiece, photorealistic, no cartoon"
+            poll_url = f"https://image.pollinations.ai/prompt/{urllib.parse.quote(safe_p)}?width=720&height=1280&model=flux&nologo=true&seed={char_seed}"
+            p_resp = await asyncio.to_thread(_req.get, poll_url, timeout=35)
+            if p_resp.status_code == 200 and len(p_resp.content) > 5000:
+                with open(ai_gen_source_path, "wb") as pf:
+                    pf.write(p_resp.content)
+                generated_ai_img = True
+                if logs_list is not None:
+                    logs_list.append(f"🎨 [{_now_str()}] 第 {sid:02d} 镜：FLUX.1 真实电影剧照生成成功 (Seed:{char_seed})！")
+        except Exception as p_err:
+            if logs_list is not None:
+                logs_list.append(f"⚠️ [{_now_str()}] 第 {sid:02d} 镜 FLUX.1 备用获取提示: {str(p_err)[:40]}")
 
     # 4. 尝试 Pexels 免费高清图库/视频库 (对标 MoneyPrinterTurbo)
     if not generated_ai_img and pexels_key:
