@@ -1245,27 +1245,14 @@ async def reset_render_pipeline():
 
 
 @app.post("/api/project/render")
-async def trigger_render_pipeline(background_tasks: BackgroundTasks, req: Optional[RenderRequest] = None):
-    """一键触发好莱坞影视工业级全链路短剧真实制作与渲染流水线."""
-    import asyncio
+async def trigger_render_pipeline(req: Optional[RenderRequest] = None):
+    """一键触发全链路短剧真实制作与渲染流水线 (直接同步执行，保持连接活跃，保障 Cloud Run 100% 全速 CPU 不休眠)."""
+    global RENDER_STATE
     if RENDER_STATE["is_rendering"]:
         return {"status": "already_running", "message": "制片机房正在全负荷真实渲染中...", "state": RENDER_STATE}
 
-    RENDER_STATE["is_rendering"] = True
-    RENDER_STATE["progress"] = 5
-    RENDER_STATE["step_index"] = 1
-    RENDER_STATE["current_step"] = "阶段 1/5：AI 总导演剧本拆解与反 PPT 感节奏调优"
-    RENDER_STATE["logs"] = [
-        f"🚀 [{_now_str()}] 曾练AI短剧创作 · 真实制片流水线启动！"
-    ]
-    RENDER_STATE["error"] = None
-
-    if background_tasks:
-        background_tasks.add_task(_run_production_pipeline, req)
-    else:
-        asyncio.create_task(_run_production_pipeline(req))
-
-    return {"status": "started", "message": "真实短剧制作与 FFmpeg 渲染流水线已启动！"}
+    await _run_production_pipeline(req)
+    return {"status": "completed", "message": "真实短剧制作与 FFmpeg 渲染流水线已完成！", "state": RENDER_STATE}
 
 
 class UpdateShotRequest(BaseModel):
