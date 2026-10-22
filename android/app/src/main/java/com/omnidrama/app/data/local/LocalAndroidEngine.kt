@@ -1478,22 +1478,16 @@ object LocalAndroidEngine {
             }
         }
 
-        // 3B. 若未配置生图 Key，优先直接载入本地打包的 8K 真人电影演员实拍剧照 (ARRI Alexa 65 实拍真实黄种人演员，拒绝卡通)
+        // 3B. 若未配置生图 Key，从本地打包的 100% 真实真人演员大片剧照库中智能选择
         if (bgBitmap == null) {
             try {
-                context.assets.open("cinema_actor_default.jpg").use { inputStream ->
+                val isFemale = isFemaleSpeaker(shot.speaker)
+                val maleActors = listOf("male_agent_suit.jpg", "detective_rain.jpg", "action_hero.jpg", "male_agent_01.jpg", "urban_night_car.jpg")
+                val chosenAsset = if (isFemale) "female_agent_01.jpg" else maleActors[(shot.id - 1) % maleActors.size]
+                context.assets.open(chosenAsset).use { inputStream ->
                     val fullBmp = BitmapFactory.decodeStream(inputStream)
                     if (fullBmp != null) {
-                        val isLeft = isFemaleSpeaker(shot.speaker) || shot.id % 2 == 1 || shot.speaker.contains("弟") || shot.speaker.contains("少")
-                        val sw = fullBmp.width
-                        val sh = fullBmp.height
-                        val cropBox = if (isLeft) {
-                            android.graphics.Rect(0, (sh * 0.18).toInt(), (sw * 0.68).toInt(), (sh * 0.85).toInt())
-                        } else {
-                            android.graphics.Rect((sw * 0.35).toInt(), (sh * 0.15).toInt(), sw, (sh * 0.82).toInt())
-                        }
-                        val cropped = Bitmap.createBitmap(fullBmp, cropBox.left, cropBox.top, cropBox.width(), cropBox.height())
-                        bgBitmap = Bitmap.createScaledBitmap(cropped, 720, 1280, true)
+                        bgBitmap = Bitmap.createScaledBitmap(fullBmp, 720, 1280, true)
                     }
                 }
             } catch (_: Exception) {

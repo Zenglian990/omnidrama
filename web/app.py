@@ -416,60 +416,32 @@ def _load_cjk_font(size: int):
 
 
 def _pick_source_manga_image(speaker: str, shot_id: int) -> Path:
-    """为本地立绘合成选择基础原画素材（若无现成素材则自动通过 Pillow 程序化生成高分漫剧底图，杜绝跨机器 FileNotFoundError）."""
-    proc_dir = ASSETS_DIR / "procedural"
-    proc_dir.mkdir(parents=True, exist_ok=True)
+    """为影视镜头选择 100% 真实真人演员电影剧照（彻底杜绝任何火柴人、火柴眼与低质简笔画）."""
+    actors_dir = ASSETS_DIR / "cinematic_actors"
+    is_female = any(k in speaker for k in ["女", "母", "柳", "妻", "姐", "妹", "妈", "雪", "妃", "婉", "瑶"])
 
-    # 先检查 assets 中是否有全局通用母图
+    if actors_dir.exists():
+        female_list = sorted(list(actors_dir.glob("female*.jpg")))
+        male_list = sorted([p for p in actors_dir.glob("*.jpg") if not p.name.startswith("female")])
+        if is_female and female_list:
+            return female_list[shot_id % len(female_list)]
+        elif male_list:
+            return male_list[shot_id % len(male_list)]
+
+    # 检查 assets 中是否有全局通用剧照
     for jpg in list(ASSETS_DIR.glob("*.jpg")):
         if jpg.exists() and jpg.stat().st_size > 5000:
             return jpg
 
-    # 动态生成差异化程序漫剧底图 (720x1280)
-    from PIL import Image, ImageDraw
-    safe_spk = "".join(c for c in (speaker or "旁白") if c.isalnum()) or "narrator"
-    out_file = proc_dir / f"base_{safe_spk}_{shot_id:02d}.jpg"
-    if out_file.exists() and out_file.stat().st_size > 2000:
-        return out_file
-
-    w, h = 720, 1280
-    im = Image.new("RGB", (w, h), (12, 16, 28))
-    draw = ImageDraw.Draw(im)
-
-    palettes = [
-        ((10, 18, 38), (28, 64, 110), (0, 220, 255)),
-        ((36, 10, 20), (96, 24, 48), (255, 90, 120)),
-        ((32, 24, 10), (88, 64, 22), (255, 205, 70)),
-        ((18, 12, 40), (62, 32, 108), (190, 120, 255)),
-    ]
-    c_top, c_bot, c_glow = palettes[(shot_id + abs(hash(speaker))) % len(palettes)]
-    for y in range(h):
-        ratio = y / h
-        r = int(c_top[0] * (1 - ratio) + c_bot[0] * ratio)
-        g = int(c_top[1] * (1 - ratio) + c_bot[1] * ratio)
-        b = int(c_top[2] * (1 - ratio) + c_bot[2] * ratio)
-        draw.line([(0, y), (w, y)], fill=(r, g, b))
-
-    # 绘制体积光晕与国漫人物剪影轮廓
-    cx, cy = w // 2, int(h * 0.44)
-    for radius in range(280, 20, -20):
-        draw.ellipse([cx - radius, cy - radius, cx + radius, cy + radius], outline=c_glow, width=1)
-
-    is_female = any(k in speaker for k in ["女", "母", "柳", "妻", "姐", "妹", "妈", "雪", "妃", "婉", "瑶"])
-    # 肩部与披风
-    draw.polygon([(cx - 230, h), (cx - 110, cy + 95), (cx + 110, cy + 95), (cx + 230, h)], fill=(18, 22, 34), outline=c_glow)
-    # 头部与发型
-    if is_female:
-        draw.polygon([(cx - 115, cy + 160), (cx - 95, cy - 110), (cx + 95, cy - 110), (cx + 115, cy + 160)], fill=(25, 20, 35))
-    draw.ellipse([cx - 75, cy - 95, cx + 75, cy + 85], fill=(228, 198, 178), outline=c_glow, width=2)
-    # 眼神高光
-    draw.line([(cx - 42, cy - 12), (cx - 14, cy - 8)], fill=(20, 24, 32), width=5)
-    draw.line([(cx + 14, cy - 8), (cx + 42, cy - 12)], fill=(20, 24, 32), width=5)
-    draw.ellipse([cx - 32, cy - 14, cx - 22, cy - 4], fill=c_glow)
-    draw.ellipse([cx + 22, cy - 14, cx + 32, cy - 4], fill=c_glow)
-
-    im.save(out_file, "JPEG", quality=92)
-    return out_file
+    # 兜底高质感暗黑电影质感底图
+    proc_dir = ASSETS_DIR / "procedural"
+    proc_dir.mkdir(parents=True, exist_ok=True)
+    fallback = proc_dir / f"clean_cinema_{shot_id:02d}.jpg"
+    if not fallback.exists():
+        from PIL import Image
+        im = Image.new("RGB", (720, 1280), (14, 18, 28))
+        im.save(fallback, "JPEG")
+    return fallback
 
 
 def _create_subtitle_overlay_png(
