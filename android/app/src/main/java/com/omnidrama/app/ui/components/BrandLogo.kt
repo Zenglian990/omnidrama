@@ -105,7 +105,7 @@ fun BrandLogo(
                         .padding(horizontal = 5.dp, vertical = 1.dp)
                 ) {
                     Text(
-                        text = "CINEMA PRO v2.5",
+                        text = "CINEMA PRO v2.6",
                         color = Color(0xFF0F131D),
                         fontSize = 8.5.sp,
                         fontWeight = FontWeight.Black

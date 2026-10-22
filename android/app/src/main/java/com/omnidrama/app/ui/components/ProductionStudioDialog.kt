@@ -151,11 +151,18 @@ fun ProductionStudioDialog(
             } ?: false
 
             if (!started) {
-                runPhoneHardwareRender()
+                val logsList = renderStatus.logs.toMutableList()
+                logsList.add("⚠️ 无法连接到远程机房或机房正忙，请检查网络后重试。")
+                renderStatus = renderStatus.copy(
+                    is_rendering = false,
+                    current_step = "❌ 远程机房未响应，请检查云端状态",
+                    logs = logsList.toList()
+                )
+                hasError = true
                 return@launch
             }
 
-            // 3. 轮询远端状态；耐心等待云端 A10G 算力（LivePortrait + F5-TTS）渲染完成
+            // 3. 轮询远端状态；耐心等待云端 A10G 算力（LivePortrait + F5-TTS）渲染完成（绝不强行切换回手机本地）
             var failCount = 0
             var idleCount = 0
             var lastProgress = -1
@@ -168,11 +175,10 @@ fun ProductionStudioDialog(
                     failCount = 0
                     if (status.progress == lastProgress && status.is_rendering) {
                         stuckCount++
-                        // 云端 A10G 神经动效与声音克隆渲染约需 20~40 秒，放宽至 70 次轮询（约 85 秒），防止提前跳回手机本地
-                        if (stuckCount >= 70) {
-                            runPhoneHardwareRender()
-                            finished = true
-                            break
+                        if (stuckCount % 20 == 0) {
+                            val logsList = renderStatus.logs.toMutableList()
+                            logsList.add("⏳ 云端机房正在全力生成中 (已运行 ${stuckCount * 1.2} 秒)，请耐心等候...")
+                            renderStatus = renderStatus.copy(logs = logsList.toList())
                         }
                     } else {
                         lastProgress = status.progress
@@ -180,7 +186,14 @@ fun ProductionStudioDialog(
                     }
 
                     if (status.error != null) {
-                        runPhoneHardwareRender()
+                        val logsList = renderStatus.logs.toMutableList()
+                        logsList.add("❌ 云端机房报错: ${status.error}")
+                        renderStatus = renderStatus.copy(
+                            is_rendering = false,
+                            current_step = "❌ 云端渲染出错: ${status.error}",
+                            logs = logsList.toList()
+                        )
+                        hasError = true
                         finished = true
                     } else if (status.progress >= 100 || (!status.is_rendering && status.progress > 0)) {
                         renderStatus = status
@@ -188,8 +201,15 @@ fun ProductionStudioDialog(
                         isComplete = true
                     } else if (!status.is_rendering && status.progress == 0) {
                         idleCount++
-                        if (idleCount >= 10) {
-                            runPhoneHardwareRender()
+                        if (idleCount >= 15) {
+                            val logsList = renderStatus.logs.toMutableList()
+                            logsList.add("⚠️ 云端机房空闲待命中，可重新点击渲染。")
+                            renderStatus = renderStatus.copy(
+                                is_rendering = false,
+                                current_step = "⚠️ 云端机房空闲待命",
+                                logs = logsList.toList()
+                            )
+                            hasError = true
                             finished = true
                         }
                     } else {
@@ -197,8 +217,15 @@ fun ProductionStudioDialog(
                     }
                 } else {
                     failCount++
-                    if (failCount >= 15) {
-                        runPhoneHardwareRender()
+                    if (failCount >= 30) {
+                        val logsList = renderStatus.logs.toMutableList()
+                        logsList.add("❌ 云端网络响应超时，连接中断。")
+                        renderStatus = renderStatus.copy(
+                            is_rendering = false,
+                            current_step = "❌ 远程网络连接断开",
+                            logs = logsList.toList()
+                        )
+                        hasError = true
                         finished = true
                     }
                 }
@@ -507,29 +534,61 @@ fun ProductionStudioDialog(
                         }
                     }
                 } else if (hasError) {
-                    Row(
+                    Column(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        Button(
-                            onClick = {
-                                hasError = false
-                                scope.launch {
-                                    runPhoneHardwareRender()
-                                }
-                            },
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00F2FE)),
-                            modifier = Modifier.weight(1f),
-                            shape = RoundedCornerShape(10.dp)
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            Text("📱 手机硬件重新压制", color = Color(0xFF0C101A), fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                            Button(
+                                onClick = {
+                                    hasError = false
+                                    isComplete = false
+                                    renderJob?.cancel()
+                                    renderJob = scope.launch {
+                                        val started = withTimeoutOrNull(25000L) {
+                                            try { repo.triggerRender(serverUrl, project) } catch (_: Exception) { false }
+                                        } ?: false
+                                        if (started) {
+                                            renderStatus = renderStatus.copy(is_rendering = true, progress = 5, current_step = "已重新连接云端制片机房...")
+                                        } else {
+                                            hasError = true
+                                        }
+                                    }
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00F2FE)),
+                                modifier = Modifier.weight(1f),
+                                shape = RoundedCornerShape(10.dp)
+                            ) {
+                                Icon(imageVector = Icons.Default.Refresh, contentDescription = null, tint = Color(0xFF0C101A), modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("🔄 重试云端渲染", color = Color(0xFF0C101A), fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                            }
+
+                            Button(
+                                onClick = {
+                                    hasError = false
+                                    scope.launch {
+                                        runPhoneHardwareRender()
+                                    }
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF334155)),
+                                modifier = Modifier.weight(1f),
+                                shape = RoundedCornerShape(10.dp)
+                            ) {
+                                Text("📱 备用: 本地压制", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                            }
                         }
+
                         Button(
                             onClick = onDismiss,
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF334155)),
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1E293B)),
+                            modifier = Modifier.fillMaxWidth(),
                             shape = RoundedCornerShape(10.dp)
                         ) {
-                            Text("关闭", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                            Text("关闭窗口", color = Color(0xFF94A3B8), fontWeight = FontWeight.Medium, fontSize = 12.sp)
                         }
                     }
                 } else {

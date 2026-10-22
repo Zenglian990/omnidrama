@@ -72,6 +72,33 @@ _load_env_file()
 
 app = FastAPI(title="曾练AI短剧创作 (OmniDrama Studio)", version="1.5.0")
 
+try:
+    from omnidrama.core.director import DirectorAgent
+    from omnidrama.core.tts_engine import TTSEngine
+    from omnidrama.core.audio_mixer import AudioMixer
+    from omnidrama.core.compositor import VideoCompositor
+    from omnidrama.core.quality_gate import auto_optimize_storyboard, verify_rendered_video
+    from omnidrama.core.cost_tracker import CostTracker, DecisionLog
+    from omnidrama.schemas.drama_schema import CameraMotionEnum, Shot, ShotScaleEnum
+    from omnidrama.providers.elevenlabs_provider import ElevenLabsProvider
+    from omnidrama.providers.siliconflow_provider import SiliconFlowProvider
+    from omnidrama.providers.dashscope_provider import DashScopeProvider
+    from omnidrama.providers.liveportrait_provider import LivePortraitProvider
+    from omnidrama.providers.f5_tts_provider import F5TTSProvider
+except ImportError:
+    from core.director import DirectorAgent
+    from core.tts_engine import TTSEngine
+    from core.audio_mixer import AudioMixer
+    from core.compositor import VideoCompositor
+    from core.quality_gate import auto_optimize_storyboard, verify_rendered_video
+    from core.cost_tracker import CostTracker, DecisionLog
+    from schemas.drama_schema import CameraMotionEnum, Shot, ShotScaleEnum
+    from providers.elevenlabs_provider import ElevenLabsProvider
+    from providers.siliconflow_provider import SiliconFlowProvider
+    from providers.dashscope_provider import DashScopeProvider
+    from providers.liveportrait_provider import LivePortraitProvider
+    from providers.f5_tts_provider import F5TTSProvider
+
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 ASSETS_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -728,45 +755,19 @@ async def _run_production_pipeline(req: Optional[RenderRequest]):
     """100% 真实执行的短剧制作与渲染流水线 (集成 OpenMontage 质检门禁 + CostTracker + DecisionLog)."""
     import asyncio
     global RENDER_STATE
-    _load_env_file()
-
-    RENDER_STATE["is_rendering"] = True
-    RENDER_STATE["error"] = None
-    RENDER_STATE["progress"] = 5
-    RENDER_STATE["step_index"] = 1
-    RENDER_STATE["current_step"] = "阶段 1/5：AI 总导演剧本拆解与反 PPT 感节奏调优"
-    RENDER_STATE["logs"] = [
-        f"🚀 [{_now_str()}] 曾练AI短剧创作 v1.8.0 (融合 OpenMontage 制片内核) · 真实制片流水线启动！"
-    ]
-
     try:
-        from omnidrama.core.director import DirectorAgent
-        from omnidrama.core.tts_engine import TTSEngine
-        from omnidrama.core.audio_mixer import AudioMixer
-        from omnidrama.core.compositor import VideoCompositor
-        from omnidrama.core.quality_gate import auto_optimize_storyboard, verify_rendered_video
-        from omnidrama.core.cost_tracker import CostTracker, DecisionLog
-        from omnidrama.schemas.drama_schema import CameraMotionEnum, Shot, ShotScaleEnum
-        from omnidrama.providers.elevenlabs_provider import ElevenLabsProvider
-        from omnidrama.providers.siliconflow_provider import SiliconFlowProvider
-        from omnidrama.providers.dashscope_provider import DashScopeProvider
-        from omnidrama.providers.liveportrait_provider import LivePortraitProvider
-        from omnidrama.providers.f5_tts_provider import F5TTSProvider
-    except ImportError:
-        from core.director import DirectorAgent
-        from core.tts_engine import TTSEngine
-        from core.audio_mixer import AudioMixer
-        from core.compositor import VideoCompositor
-        from core.quality_gate import auto_optimize_storyboard, verify_rendered_video
-        from core.cost_tracker import CostTracker, DecisionLog
-        from schemas.drama_schema import CameraMotionEnum, Shot, ShotScaleEnum
-        from providers.elevenlabs_provider import ElevenLabsProvider
-        from providers.siliconflow_provider import SiliconFlowProvider
-        from providers.dashscope_provider import DashScopeProvider
-        from providers.liveportrait_provider import LivePortraitProvider
-        from providers.f5_tts_provider import F5TTSProvider
+        _load_env_file()
 
-    try:
+        RENDER_STATE["is_rendering"] = True
+        RENDER_STATE["error"] = None
+        RENDER_STATE["progress"] = 5
+        RENDER_STATE["step_index"] = 1
+        RENDER_STATE["current_step"] = "阶段 1/5：AI 总导演剧本拆解与反 PPT 感节奏调优"
+        RENDER_STATE["logs"] = [
+            f"🚀 [{_now_str()}] 曾练AI短剧创作 v1.8.0 (融合 OpenMontage 制片内核) · 真实制片流水线启动！"
+        ]
+
+
         data = _load_project_data()
         title = (req.title if req and req.title else data.get("title", "至尊龙王归位")).strip()
         genre = (req.genre if req and req.genre else data.get("genre", "都市战神爽文")).strip()
@@ -1244,7 +1245,7 @@ async def reset_render_pipeline():
 
 
 @app.post("/api/project/render")
-async def trigger_render_pipeline(req: Optional[RenderRequest] = None, background_tasks: BackgroundTasks = None):
+async def trigger_render_pipeline(background_tasks: BackgroundTasks, req: Optional[RenderRequest] = None):
     """一键触发好莱坞影视工业级全链路短剧真实制作与渲染流水线."""
     import asyncio
     if RENDER_STATE["is_rendering"]:

@@ -2343,7 +2343,7 @@ object LocalAndroidEngine {
             hasSeedance -> "预估 ¥${String.format(Locale.US, "%.2f", n * 0.35)} (火山Seedance视频+生图)"
             hasDashScope -> "预估 ¥${String.format(Locale.US, "%.2f", n * 0.14)} (阿里通义万相2.1+Qwen配音)"
             hasSiliconFlow -> "预估 ¥0.00 (硅基流动免费FLUX生图+免费TTS)"
-            else -> "预估 ¥0.00 (手机端零成本独立硬件渲染)"
+            else -> "☁️ 远程 A10G 算力机房 (LivePortrait + F5-TTS / Edge-TTS 全流程云端合成)"
         }
     }
 
