@@ -72,35 +72,103 @@ _load_env_file()
 
 app = FastAPI(title="曾练AI短剧创作 (OmniDrama Studio)", version="1.5.0")
 
+# 核心导演与基础工具（100% 独立引入，绝对保障可用）
 try:
+    from core.cost_tracker import CostTracker, DecisionLog
+except Exception:
+    try:
+        from omnidrama.core.cost_tracker import CostTracker, DecisionLog
+    except Exception:
+        pass
+
+try:
+    from schemas.drama_schema import CameraMotionEnum, Shot, ShotScaleEnum
+except Exception:
+    try:
+        from omnidrama.schemas.drama_schema import CameraMotionEnum, Shot, ShotScaleEnum
+    except Exception:
+        pass
+
+try:
+    from core.quality_gate import auto_optimize_storyboard, verify_rendered_video
+except Exception:
+    try:
+        from omnidrama.core.quality_gate import auto_optimize_storyboard, verify_rendered_video
+    except Exception:
+        pass
+
+try:
+    from core.audio_mixer import AudioMixer
+except Exception:
+    try:
+        from omnidrama.core.audio_mixer import AudioMixer
+    except Exception:
+        pass
+
+try:
+    from core.compositor import VideoCompositor
+except Exception:
+    try:
+        from omnidrama.core.compositor import VideoCompositor
+    except Exception:
+        pass
+
+try:
+    from core.director import DirectorAgent
+except Exception:
     try:
         from omnidrama.core.director import DirectorAgent
+    except Exception:
+        pass
+
+try:
+    from core.tts_engine import TTSEngine
+except Exception:
+    try:
         from omnidrama.core.tts_engine import TTSEngine
-        from omnidrama.core.audio_mixer import AudioMixer
-        from omnidrama.core.compositor import VideoCompositor
-        from omnidrama.core.quality_gate import auto_optimize_storyboard, verify_rendered_video
-        from omnidrama.core.cost_tracker import CostTracker, DecisionLog
-        from omnidrama.schemas.drama_schema import CameraMotionEnum, Shot, ShotScaleEnum
+    except Exception:
+        pass
+
+# 可选高阶 AI 模型 Provider（独立隔离，互不影响）
+try:
+    from providers.elevenlabs_provider import ElevenLabsProvider
+except Exception:
+    try:
         from omnidrama.providers.elevenlabs_provider import ElevenLabsProvider
+    except Exception:
+        ElevenLabsProvider = None
+
+try:
+    from providers.siliconflow_provider import SiliconFlowProvider
+except Exception:
+    try:
         from omnidrama.providers.siliconflow_provider import SiliconFlowProvider
+    except Exception:
+        SiliconFlowProvider = None
+
+try:
+    from providers.dashscope_provider import DashScopeProvider
+except Exception:
+    try:
         from omnidrama.providers.dashscope_provider import DashScopeProvider
+    except Exception:
+        DashScopeProvider = None
+
+try:
+    from providers.liveportrait_provider import LivePortraitProvider
+except Exception:
+    try:
         from omnidrama.providers.liveportrait_provider import LivePortraitProvider
+    except Exception:
+        LivePortraitProvider = None
+
+try:
+    from providers.f5_tts_provider import F5TTSProvider
+except Exception:
+    try:
         from omnidrama.providers.f5_tts_provider import F5TTSProvider
     except Exception:
-        from core.director import DirectorAgent
-        from core.tts_engine import TTSEngine
-        from core.audio_mixer import AudioMixer
-        from core.compositor import VideoCompositor
-        from core.quality_gate import auto_optimize_storyboard, verify_rendered_video
-        from core.cost_tracker import CostTracker, DecisionLog
-        from schemas.drama_schema import CameraMotionEnum, Shot, ShotScaleEnum
-        from providers.elevenlabs_provider import ElevenLabsProvider
-        from providers.siliconflow_provider import SiliconFlowProvider
-        from providers.dashscope_provider import DashScopeProvider
-        from providers.liveportrait_provider import LivePortraitProvider
-        from providers.f5_tts_provider import F5TTSProvider
-except Exception as _e:
-    print(f"Notice: Deferred module load on container startup: {_e}")
+        F5TTSProvider = None
 
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 ASSETS_DIR.mkdir(parents=True, exist_ok=True)
@@ -938,7 +1006,7 @@ async def _run_production_pipeline(req: Optional[RenderRequest]):
         eleven_provider = ElevenLabsProvider(api_key=eleven_key) if eleven_key else None
         ds_tts_provider = DashScopeProvider(api_key=ds_key) if ds_key else None
         sf_tts_provider = SiliconFlowProvider(api_key=sf_key) if sf_key else None
-        f5_provider = F5TTSProvider()
+        f5_provider = F5TTSProvider() if F5TTSProvider is not None else None
 
         tts_tool_name = "elevenlabs_tts" if eleven_key else ("edge_tts")
         decision_log.record(
