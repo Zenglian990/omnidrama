@@ -270,9 +270,15 @@ fun SotaEngineDialog(
 
                 Spacer(modifier = Modifier.height(12.dp))
 
+                val context = androidx.compose.ui.platform.LocalContext.current
                 Button(
                     onClick = {
-                        val cleanKeys = keyInputs.filterValues { it.isNotBlank() }
+                        val cleanKeys = keyInputs.filterValues { it.isNotBlank() }.toMutableMap()
+                        // 如果用户只是点击同步，把手机本地已存的全部商业 Key 一并打包同步给云端
+                        if (cleanKeys.isEmpty()) {
+                            val savedLocal = com.omnidrama.app.data.local.LocalAndroidEngine.getSavedApiKeys(context)
+                            cleanKeys.putAll(savedLocal)
+                        }
                         onSaveConfig(serverUrl.trim(), cleanKeys)
                     },
                     enabled = !isSaving,
