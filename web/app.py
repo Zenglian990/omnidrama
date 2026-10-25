@@ -383,6 +383,7 @@ class RenderRequest(BaseModel):
     novel_text: Optional[str] = ""
     shots: Optional[List[Dict[str, Any]]] = None
     characters: Optional[List[Dict[str, Any]]] = None
+    api_keys: Optional[Dict[str, str]] = None
 
 
 @app.get("/api/project/render-status")
@@ -416,24 +417,45 @@ def _load_cjk_font(size: int):
 
 
 def _pick_source_manga_image(speaker: str, shot_id: int) -> Path:
-    """为影视镜头选择 100% 真实真人演员电影剧照（彻底杜绝任何火柴人、火柴眼与低质简笔画）."""
+    """为影视镜头精准匹配 100% 电影级真人演员剧照（角色严格锁定，杜绝换脸与低质画风）."""
     actors_dir = ASSETS_DIR / "cinematic_actors"
-    is_female = any(k in speaker for k in ["女", "母", "柳", "妻", "姐", "妹", "妈", "雪", "妃", "婉", "瑶"])
 
-    if actors_dir.exists():
-        female_list = sorted(list(actors_dir.glob("female*.jpg")))
-        male_list = sorted([p for p in actors_dir.glob("*.jpg") if not p.name.startswith("female")])
-        if is_female and female_list:
-            return female_list[shot_id % len(female_list)]
-        elif male_list:
-            return male_list[shot_id % len(male_list)]
+    # 1. 角色人设绝对绑定
+    if any(k in speaker for k in ["易冷", "特工", "战神", "主角", "男主", "龙王", "修罗", "尊者"]):
+        yileng = actors_dir / "actor_yileng.jpg"
+        if yileng.exists():
+            return yileng
 
-    # 检查 assets 中是否有全局通用剧照
-    for jpg in list(ASSETS_DIR.glob("*.jpg")):
+    if any(k in speaker for k in ["暖暖", "女儿", "小女孩", "女孩", "小妹", "妹", "童", "女"]):
+        nuannuan = actors_dir / "actor_yinuannuan.jpg"
+        if nuannuan.exists():
+            return nuannuan
+
+    if any(k in speaker for k in ["恶霸", "反派", "刀疤", "打手", "混混", "泼皮", "流氓", "坏人", "仇敌"]):
+        gangster = actors_dir / "actor_scar_gangster.jpg"
+        if gangster.exists():
+            return gangster
+
+    # 2. 旁白/场景镜头按剧情节点赋予院线宏大场景
+    if "旁白" in speaker or "Scene" in speaker or not speaker:
+        if shot_id <= 2:
+            scene_rain = actors_dir / "scene_rain_alley.jpg"
+            if scene_rain.exists():
+                return scene_rain
+        else:
+            scene_fight = actors_dir / "scene_fight_action.jpg"
+            if scene_fight.exists():
+                return scene_fight
+
+    # 3. 兜底保障锁定主角
+    yileng = actors_dir / "actor_yileng.jpg"
+    if yileng.exists():
+        return yileng
+
+    for jpg in list(actors_dir.glob("*.jpg")):
         if jpg.exists() and jpg.stat().st_size > 5000:
             return jpg
 
-    # 兜底高质感暗黑电影质感底图
     proc_dir = ASSETS_DIR / "procedural"
     proc_dir.mkdir(parents=True, exist_ok=True)
     fallback = proc_dir / f"clean_cinema_{shot_id:02d}.jpg"
@@ -828,6 +850,10 @@ async def _run_production_pipeline(req: Optional[RenderRequest]):
     global RENDER_STATE
     try:
         _load_env_file()
+        if req and req.api_keys:
+            for k, v in req.api_keys.items():
+                if v and str(v).strip() and str(v).strip() != "__CLEAR__":
+                    os.environ[k.strip()] = str(v).strip()
 
         RENDER_STATE["is_rendering"] = True
 
@@ -1501,6 +1527,7 @@ class GenerateScriptRequest(BaseModel):
     title: str = "新短剧"
     genre: str = "都市爽文"
     novel_text: str
+    api_keys: Optional[Dict[str, str]] = None
 
 
 @app.post("/api/project/generate")
@@ -1508,6 +1535,10 @@ async def generate_script_endpoint(req: GenerateScriptRequest):
     """根据输入小说文本调用真实大模型 (或智能规则引擎) 拆解全新剧本与角色资产."""
     import asyncio
     _load_env_file()
+    if req and req.api_keys:
+        for k, v in req.api_keys.items():
+            if v and str(v).strip() and str(v).strip() != "__CLEAR__":
+                os.environ[k.strip()] = str(v).strip()
     try:
         from omnidrama.core.director import DirectorAgent
     except ImportError:

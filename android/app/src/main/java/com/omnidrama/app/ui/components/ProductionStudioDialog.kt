@@ -163,7 +163,7 @@ fun ProductionStudioDialog(
             if (initialStatus == null || !initialStatus.is_rendering) {
                 val started = withTimeoutOrNull(25000L) {
                     try {
-                        repo.triggerRender(serverUrl, project)
+                        repo.triggerRender(context, serverUrl, project)
                     } catch (_: Exception) {
                         false
                     }

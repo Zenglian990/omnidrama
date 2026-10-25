@@ -192,12 +192,19 @@ class DirectorAgent:
                 scale = ShotScaleEnum.MEDIUM_SHOT
                 motion = CameraMotionEnum.PAN_RIGHT if shot_id % 2 == 0 else CameraMotionEnum.PAN_LEFT
 
-            visual_prompt = (
-                f"8k cinematic live-action movie still, shot on ARRI Alexa 65, 35mm Panavision anamorphic lens, "
-                f"{scale.value}, photorealistic Chinese actor playing {speaker}, {dialogue}, "
-                f"authentic facial texture, subtle skin pores, realistic costume, theatrical cinema lighting, 35mm film grain, "
-                f"blockbuster cinematography, masterpiece, no cartoon, no anime, vertical 9:16"
-            )
+            if speaker in ["旁白", "Scene", "环境"]:
+                visual_prompt = (
+                    f"8k cinematic wide live-action movie still, shot on ARRI Alexa 65, 35mm Panavision anamorphic lens, "
+                    f"atmospheric {genre} cinematic scene, {dialogue}, dramatic cinematic lighting, authentic realistic film texture, "
+                    f"volumetric mist, photorealistic environment, masterpiece, theatrical cinematography, no cartoon, no anime, vertical 9:16"
+                )
+            else:
+                visual_prompt = (
+                    f"8k cinematic live-action movie still, shot on ARRI Alexa 65, 35mm Panavision anamorphic lens, "
+                    f"{scale.value}, photorealistic Chinese actor playing {speaker}, {dialogue}, "
+                    f"authentic facial texture, subtle skin pores, realistic costume, theatrical cinema lighting, 35mm film grain, "
+                    f"blockbuster cinematography, masterpiece, no cartoon, no anime, vertical 9:16"
+                )
 
             shots.append(
                 Shot(
@@ -241,7 +248,7 @@ class DirectorAgent:
         deepseek_key = api_key or os.environ.get("DEEPSEEK_API_KEY", "").strip()
         moonshot_key = os.environ.get("MOONSHOT_API_KEY", "").strip()
         anthropic_key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
-        gemini_key = os.environ.get("GEMINI_API_KEY", os.environ.get("GOOGLE_API_KEY", "AIzaSyC6mr-lAUWnlZq6Oi4oGRHsq1EtBChFyio")).strip()
+        gemini_key = os.environ.get("GEMINI_API_KEY", os.environ.get("GOOGLE_API_KEY", "")).strip()
 
         user_prompt = f"短剧标题: {title}\n题材: {genre}\n小说原文:\n{raw_text}"
 
@@ -340,7 +347,7 @@ class DirectorAgent:
         # 5. 尝试 Google Gemini API
         if gemini_key:
             try:
-                url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={gemini_key}"
+                url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={gemini_key}"
                 payload = {
                     "systemInstruction": {"parts": [{"text": DIRECTOR_SYSTEM_PROMPT}]},
                     "contents": [{"parts": [{"text": user_prompt}]}],
@@ -352,7 +359,7 @@ class DirectorAgent:
                     content_str = data["candidates"][0]["content"]["parts"][0]["text"]
                     parsed = self._extract_json(content_str)
                     proj = DramaProject.model_validate(parsed)
-                    self.last_used_engine = "Google Gemini 2.0 Flash"
+                    self.last_used_engine = "Google Gemini 2.5 Flash"
                     return proj
             except Exception as e:
                 print(f"[DirectorAgent] Gemini 调用异常: {e}")

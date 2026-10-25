@@ -93,18 +93,30 @@ class TTSEngine:
             voice = "zh-CN-YunxiNeural"
 
         os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
-        try:
-            communicate = edge_tts.Communicate(text=text, voice=voice, rate=rate, pitch=pitch)
-            await communicate.save(output_path)
-        except Exception:
-            pass
+        clean_text = (text or "").strip()
+        if not clean_text:
+            clean_text = "……"
+
+        # 尝试多次 Edge-TTS 7.3.1 真实合成
+        for attempt in range(3):
+            try:
+                communicate = edge_tts.Communicate(text=clean_text, voice=voice, rate=rate, pitch=pitch)
+                await communicate.save(output_path)
+                if os.path.exists(output_path) and os.path.getsize(output_path) > 500:
+                    break
+            except Exception as e:
+                if attempt == 2:
+                    print(f"[TTSEngine] Edge-TTS 最终失败: {e}")
+                import asyncio
+                await asyncio.sleep(0.5)
 
         if not os.path.exists(output_path) or os.path.getsize(output_path) == 0:
-            calc_dur = max(1.5, len(text) * 0.25)
+            # 绝不用纯静音糊弄，至少生成温和的环境底噪和提示声
+            calc_dur = max(1.5, len(clean_text) * 0.25)
             subprocess.run([
                 "ffmpeg", "-y", "-f", "lavfi",
-                "-i", "anullsrc=r=44100:cl=mono",
-                "-t", f"{calc_dur:.2f}",
+                "-i", "sine=frequency=440:duration=0.1",
+                "-af", "apad=whole_dur=" + f"{calc_dur:.2f}",
                 "-acodec", "libmp3lame",
                 output_path
             ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
