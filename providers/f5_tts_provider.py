@@ -16,7 +16,19 @@ from typing import Optional, Dict, Any, Tuple
 logger = logging.getLogger(__name__)
 
 DEFAULT_SPACE_URL = "https://zenglian110110-f5-tts-studio.hf.space"
-DEFAULT_TOKEN = os.environ.get("HF_TOKEN", "")
+
+def _get_hf_token() -> str:
+    token = os.environ.get("HF_TOKEN", "").strip()
+    if not token:
+        try:
+            token_path = Path.home() / ".huggingface" / "token"
+            if token_path.exists():
+                token = token_path.read_text(encoding="utf-8").strip()
+        except Exception:
+            pass
+    return token
+
+DEFAULT_TOKEN = _get_hf_token()
 
 
 class F5TTSProvider:
@@ -57,11 +69,16 @@ class F5TTSProvider:
 
     @property
     def client(self):
-        """懒加载 Gradio Client 连接."""
+        """懒加载 Gradio Client 连接 (自动支持代理与最新 gradio_client 规范)."""
         if self._client is None and self.enabled:
             try:
+                for port in ["7897", "7890"]:
+                    if not os.environ.get("http_proxy"):
+                        os.environ["http_proxy"] = f"http://127.0.0.1:{port}"
+                        os.environ["https_proxy"] = f"http://127.0.0.1:{port}"
+                        break
                 from gradio_client import Client
-                self._client = Client(self.space_url, hf_token=self.token)
+                self._client = Client(self.space_url, token=self.token, ssl_verify=False)
                 logger.info(f"[F5-TTS] 成功连接云端声音克隆空间: {self.space_url}")
             except Exception as e:
                 logger.warning(f"[F5-TTS] 连接云端配音空间异常: {e}")

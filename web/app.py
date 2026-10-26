@@ -57,7 +57,7 @@ MANAGED_PROVIDER_KEYS = [
 
 
 def _load_env_file():
-    """严格从 omnidrama/.env 加载用户真实保存的 API Key（清除未在 .env 中配置的父进程残留变量）."""
+    """从 omnidrama/.env 加载保存的 API Key（安全合并，不抹除全局或父进程已存在的环境变量）."""
     saved: Dict[str, str] = {}
     if ENV_FILE.exists():
         try:
@@ -72,10 +72,8 @@ def _load_env_file():
         except Exception:
             pass
     for mk in MANAGED_PROVIDER_KEYS:
-        if mk in saved:
+        if mk in saved and saved[mk]:
             os.environ[mk] = saved[mk]
-        else:
-            os.environ.pop(mk, None)
 
 
 _load_env_file()
@@ -728,7 +726,7 @@ async def _generate_single_shot_visual(
     ark_key = os.environ.get("ARK_API_KEY", "").strip()
     kling_key = (os.environ.get("KLING_ACCESS_KEY", "") or os.environ.get("KLING_API_KEY", "")).strip()
 
-    if generated_ai_img and ark_key and sid == 1:
+    if (generated_ai_img or os.path.exists(ai_gen_source_path)) and ark_key:
         try:
             try:
                 from omnidrama.providers.volcengine_seedance_provider import VolcengineSeedanceProvider
@@ -756,7 +754,7 @@ async def _generate_single_shot_visual(
         except Exception:
             pass
 
-    if not pexels_video_clip and generated_ai_img and kling_key and sid == 1:
+    if not pexels_video_clip and (generated_ai_img or os.path.exists(ai_gen_source_path)) and kling_key:
         try:
             import base64
             try:
@@ -1647,8 +1645,14 @@ async def delete_character_endpoint(name: str):
 
 @app.get("/api/voices")
 async def get_available_voices():
-    """获取系统支持的配音音色母带字典."""
+    """获取系统支持的配音音色母带字典 (优先置顶曾先生 HuggingFace A10G 专属 F5-TTS 声音克隆)."""
     return [
+        {
+            "name": "🔥 HuggingFace F5-TTS 专属声音克隆",
+            "code": "hf-f5-tts-clone",
+            "tag": "曾先生ZeroGPU A10G · 真实演员原声克隆",
+            "gender": "custom"
+        },
         {"name": "云希 (磁性沉稳霸道)", "code": "zh-CN-YunxiNeural", "tag": "男霸总/战神", "gender": "male"},
         {"name": "云健 (嚣张跋扈反派)", "code": "zh-CN-YunjianNeural", "tag": "纨绔恶少/挑衅", "gender": "male"},
         {"name": "云扬 (热血青年男主)", "code": "zh-CN-YunyangNeural", "tag": "少年修仙/逆袭", "gender": "male"},
@@ -1713,6 +1717,22 @@ async def preview_voice(voice: str = "zh-CN-YunxiNeural", text: str = ""):
 
     preview_dir = OUTPUT_DIR / "voice_previews"
     preview_dir.mkdir(parents=True, exist_ok=True)
+
+    if "hf-f5" in voice.lower() or "f5-tts" in voice.lower():
+        try:
+            try:
+                from omnidrama.providers.f5_tts_provider import F5TTSProvider
+            except ImportError:
+                from providers.f5_tts_provider import F5TTSProvider
+            f5 = F5TTSProvider()
+            sample_text = sample_text or "三年了，我终于回来了。欠我的，今夜一并还清！"
+            out_wav = preview_dir / f"hf_f5_preview_{abs(hash(sample_text))}.wav"
+            res = await asyncio.to_thread(f5.synthesize_character_voice, text=sample_text, role="男主角", output_path=str(out_wav))
+            if res and os.path.exists(res):
+                return FileResponse(str(res), media_type="audio/wav")
+        except Exception as e:
+            print(f"[app.py] F5-TTS preview failed: {e}")
+
     out_file = preview_dir / f"{voice_code}_{abs(hash(sample_text))}.mp3"
 
     if not out_file.exists():

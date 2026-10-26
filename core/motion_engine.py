@@ -20,8 +20,14 @@ class LiveActionMotionEngine:
         self.width = target_width
         self.height = target_height
         self.fps = fps
-        cascade_path = cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
-        self.face_cascade = cv2.CascadeClassifier(cascade_path)
+        self.face_cascade = None
+        try:
+            if hasattr(cv2, "data") and hasattr(cv2.data, "haarcascades") and hasattr(cv2, "CascadeClassifier"):
+                cascade_path = os.path.join(cv2.data.haarcascades, "haarcascade_frontalface_default.xml")
+                if os.path.exists(cascade_path):
+                    self.face_cascade = cv2.CascadeClassifier(cascade_path)
+        except Exception:
+            self.face_cascade = None
 
     def _extract_audio_envelope(self, audio_path: str, duration: float) -> np.ndarray:
         """从音频提取每帧的音量包络 (RMS Amplitude)，用于驱动嘴巴开合."""
@@ -69,8 +75,13 @@ class LiveActionMotionEngine:
 
     def _detect_facial_landmarks(self, frame: np.ndarray) -> Tuple[Tuple[int, int, int, int], Tuple[int, int, int, int]]:
         """检测面部关键区域：嘴唇 ROI 与 双眼 ROI."""
-        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        faces = self.face_cascade.detectMultiScale(gray, 1.15, 3)
+        faces = ()
+        if self.face_cascade is not None:
+            try:
+                gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+                faces = self.face_cascade.detectMultiScale(gray, 1.15, 3)
+            except Exception:
+                faces = ()
 
         if len(faces) > 0:
             fx, fy, fw, fh = max(faces, key=lambda b: b[2] * b[3])

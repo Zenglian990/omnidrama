@@ -173,20 +173,23 @@
         <!-- 角色定妆资产库 -->
         <div>
           <h2 class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2 flex items-center justify-between">
-            <span><i class="fa-solid fa-users text-brand-cyan mr-1.5"></i> 角色定妆资产卡</span>
-            <span class="text-[10px] text-gray-500">{{ project.characters.length }} 位出场</span>
+            <span><i class="fa-solid fa-users text-brand-cyan mr-1.5"></i> 角色定妆与定音卡</span>
+            <button @click="openCharacterEdit(null)" class="text-[10px] px-2 py-0.5 rounded bg-brand-cyan/20 text-brand-cyan hover:bg-brand-cyan/30 transition flex items-center space-x-1">
+              <i class="fa-solid fa-plus text-[9px]"></i><span>定妆定音</span>
+            </button>
           </h2>
           <div class="space-y-2.5">
-            <div v-for="char in project.characters" :key="char.name" class="p-2.5 rounded-lg bg-brand-card border border-brand-border hover:border-brand-cyan/50 transition">
+            <div v-for="char in project.characters" :key="char.name" @click="openCharacterEdit(char)" class="p-2.5 rounded-lg bg-brand-card border border-brand-border hover:border-brand-cyan/60 transition cursor-pointer group">
               <div class="flex items-center space-x-2.5">
-                <img :src="char.avatar" class="w-11 h-11 rounded-lg object-cover border border-gray-700">
+                <img :src="char.avatar" class="w-11 h-11 rounded-lg object-cover border border-gray-700 group-hover:border-brand-cyan transition">
                 <div class="flex-1 min-w-0">
                   <div class="font-bold text-sm text-gray-100 flex items-center justify-between">
                     <span class="truncate">{{ char.name }}</span>
                     <span class="text-[10px] px-1.5 py-0.5 rounded bg-brand-border text-amber-300">{{ char.role }}</span>
                   </div>
-                  <div class="text-[11px] text-brand-cyan truncate mt-0.5">
-                    <i class="fa-solid fa-microphone text-[10px] mr-1"></i>{{ char.voice }}
+                  <div class="text-[11px] text-brand-cyan truncate mt-0.5 flex items-center justify-between">
+                    <span><i class="fa-solid fa-microphone text-[10px] mr-1"></i>{{ char.voice }}</span>
+                    <span class="text-[10px] text-gray-500 group-hover:text-brand-cyan">⚙️ 定妆</span>
                   </div>
                 </div>
               </div>
@@ -678,6 +681,80 @@
       </div>
     </div>
 
+    <!-- 角色定妆与定音工坊弹窗 (Character Makeup & Voice Studio Modal) -->
+    <div v-if="editingCharacter" class="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-4">
+      <div class="w-full max-w-lg bg-brand-card border border-brand-cyan/40 rounded-2xl shadow-2xl overflow-hidden text-xs">
+        <div class="px-6 py-4 border-b border-brand-border flex items-center justify-between bg-brand-dark">
+          <div>
+            <h3 class="font-bold text-sm text-brand-cyan flex items-center space-x-1.5">
+              <span>🎭 角色定妆与定音工坊</span>
+              <span class="text-[10px] px-2 py-0.5 rounded bg-cyan-950 text-cyan-300 border border-cyan-800">全剧长相与声线锁定</span>
+            </h3>
+            <p class="text-[11px] text-gray-400 mt-0.5">跨集锁脸、锁衣品定妆照 + 专属母带戏剧音色与在线试听</p>
+          </div>
+          <button @click="editingCharacter = null" class="text-gray-400 hover:text-white"><i class="fa-solid fa-xmark text-lg"></i></button>
+        </div>
+        <div class="p-6 space-y-4 max-h-[75vh] overflow-y-auto">
+          <!-- 角色基本信息 -->
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="block text-gray-400 mb-1 font-medium">角色姓名</label>
+              <input v-model="editingCharacter.name" type="text" placeholder="例如：易冷、林清雪" class="w-full bg-brand-dark border border-brand-border rounded-lg px-3 py-2 text-gray-100">
+            </div>
+            <div>
+              <label class="block text-gray-400 mb-1 font-medium">剧情定位标签</label>
+              <input v-model="editingCharacter.role" type="text" placeholder="例如：核心战神男主、冷艳女帝" class="w-full bg-brand-dark border border-brand-border rounded-lg px-3 py-2 text-gray-100">
+            </div>
+          </div>
+
+          <!-- 角色定妆视觉锁脸 Prompt -->
+          <div>
+            <label class="block text-gray-400 mb-1 font-medium flex items-center justify-between">
+              <span>🎨 角色定妆锁脸设定 (AI Visual Traits)</span>
+              <span class="text-[10px] text-gray-500">固定五官、发型与服装特征</span>
+            </label>
+            <textarea v-model="editingCharacter.traits" rows="2" placeholder="例如：黑色修身战术风衣，剑眉星目，眼神冷峻如霜，身材挺拔，短黑发" class="w-full bg-brand-dark border border-brand-border rounded-lg p-2.5 text-gray-200"></textarea>
+          </div>
+
+          <!-- 定妆头像/参考剧照 URL -->
+          <div>
+            <label class="block text-gray-400 mb-1 font-medium">🖼️ 定妆剧照路径 / 头像 URL</label>
+            <input v-model="editingCharacter.avatar" type="text" placeholder="例如：/assets/cinematic_actors/actor_yileng.jpg 或图片URL" class="w-full bg-brand-dark border border-brand-border rounded-lg px-3 py-2 text-gray-300">
+          </div>
+
+          <!-- 角色定音：专属声线选择与在线试听 -->
+          <div>
+            <div class="flex items-center justify-between mb-1.5">
+              <label class="text-gray-400 font-medium">🎙️ 专属母带音色 (定音锁定)</label>
+              <button @click="testVoiceSample(editingCharacter.voice)" :disabled="isPlayingSample" class="text-[11px] px-2.5 py-1 rounded bg-amber-500/20 text-amber-300 hover:bg-amber-500/30 border border-amber-500/40 transition flex items-center space-x-1">
+                <i :class="isPlayingSample ? 'fa-solid fa-spinner fa-spin' : 'fa-solid fa-volume-high'"></i>
+                <span>{{ isPlayingSample ? '正在合成试听...' : '🔊 试听选定配音' }}</span>
+              </button>
+            </div>
+            <div class="grid grid-cols-2 gap-2 max-h-44 overflow-y-auto pr-1">
+              <div v-for="v in availableVoices" :key="v.name" @click="editingCharacter.voice = v.name" :class="editingCharacter.voice === v.name ? 'border-brand-cyan bg-cyan-950/30' : 'border-brand-border bg-brand-dark hover:border-gray-600'" class="p-2 rounded-lg border cursor-pointer transition flex items-center justify-between">
+                <div>
+                  <div class="font-bold text-gray-200 text-[11px]">{{ v.name }}</div>
+                  <div class="text-[10px] text-amber-400">{{ v.tag }}</div>
+                </div>
+                <i v-if="editingCharacter.voice === v.name" class="fa-solid fa-circle-check text-brand-cyan text-xs"></i>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="px-6 py-3.5 border-t border-brand-border bg-brand-dark flex justify-between items-center">
+          <button v-if="editingCharacter._isExisting" @click="deleteCharacter(editingCharacter.name)" class="text-rose-400 hover:text-rose-300 text-xs">删除角色</button>
+          <div v-else></div>
+          <div class="flex space-x-3">
+            <button @click="editingCharacter = null" class="px-4 py-1.5 rounded-lg text-gray-400 hover:text-white">取消</button>
+            <button @click="saveCharacterEdit" :disabled="isSavingChar" class="px-5 py-1.5 rounded-lg bg-gradient-to-r from-cyan-500 to-blue-600 text-black font-bold shadow hover:from-cyan-400 hover:to-blue-500 transition disabled:opacity-50">
+              {{ isSavingChar ? '正在保存...' : '锁定定妆并保存' }}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- 爆款参考视频逆向拆解与仿写弹窗 (Reference Video Analyst Modal) -->
     <div v-if="showRefModal" class="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
       <div class="w-full max-w-3xl bg-brand-card border border-rose-500/40 rounded-2xl shadow-2xl overflow-hidden text-xs">
@@ -968,6 +1045,10 @@
         // 5阶段合成与单镜编辑状态
         const renderState = ref({ is_rendering: false, progress: 0, current_step: '就绪' });
         const editingShot = ref(null);
+        const editingCharacter = ref(null);
+        const availableVoices = ref([]);
+        const isPlayingSample = ref(false);
+        const isSavingChar = ref(false);
         const isSavingShot = ref(false);
 
         const activeVideoMode = ref('full');
@@ -1309,7 +1390,106 @@
           await runQualityCheck(true);
         };
 
+        const fetchVoices = async () => {
+          try {
+            const res = await fetch('/api/voices');
+            const data = await res.json();
+            if (Array.isArray(data)) availableVoices.value = data;
+          } catch (e) {
+            console.error('Failed to fetch voices', e);
+          }
+        };
+
+        const openCharacterEdit = (char) => {
+          if (char) {
+            editingCharacter.value = {
+              name: char.name || '',
+              role: char.role || '主要角色',
+              voice: char.voice || (availableVoices.value[0] && availableVoices.value[0].name) || '云希 (磁性沉稳霸道)',
+              avatar: char.avatar || '',
+              traits: char.traits || '',
+              _isExisting: true
+            };
+          } else {
+            editingCharacter.value = {
+              name: '',
+              role: '核心主角',
+              voice: (availableVoices.value[0] && availableVoices.value[0].name) || '云希 (磁性沉稳霸道)',
+              avatar: '/assets/cinematic_actors/actor_yileng.jpg',
+              traits: '黑色修身战袍，剑眉星目，冷酷如霜，身材挺拔',
+              _isExisting: false
+            };
+          }
+        };
+
+        const testVoiceSample = async (voiceName) => {
+          if (!voiceName) return;
+          isPlayingSample.value = true;
+          try {
+            const vObj = availableVoices.value.find(v => v.name === voiceName);
+            const vCode = vObj ? vObj.code : 'zh-CN-YunxiNeural';
+            const sampleSentence = voiceName.includes('晓晓') ? '哼，凭你也配跟我平起平坐？别做梦了！' :
+              (voiceName.includes('云健') ? '在江城，还没有人敢这么跟我说话！' : '三年了，我终于回来了。欠我的，今夜一并还清！');
+            const audioUrl = `/api/voices/preview?voice=${encodeURIComponent(vCode)}&text=${encodeURIComponent(sampleSentence)}`;
+            const audio = new Audio(audioUrl);
+            audio.onended = () => { isPlayingSample.value = false; };
+            audio.onerror = () => { isPlayingSample.value = false; showNotice('提示', '音频试听失败'); };
+            await audio.play();
+          } catch (e) {
+            isPlayingSample.value = false;
+          }
+        };
+
+        const saveCharacterEdit = async () => {
+          if (!editingCharacter.value || !editingCharacter.value.name.trim()) {
+            showNotice('提示', '请填写角色姓名');
+            return;
+          }
+          isSavingChar.value = true;
+          try {
+            const payload = {
+              name: editingCharacter.value.name.trim(),
+              role: editingCharacter.value.role.trim() || '主要角色',
+              voice: editingCharacter.value.voice,
+              avatar: editingCharacter.value.avatar.trim() || '/assets/cinematic_actors/actor_yileng.jpg',
+              traits: editingCharacter.value.traits.trim() || `${editingCharacter.value.name}，动漫影视级画风`
+            };
+            const res = await fetch('/api/characters', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(payload)
+            });
+            const data = await res.json();
+            if (data.characters) {
+              project.value.characters = data.characters;
+            }
+            editingCharacter.value = null;
+            showNotice('定妆定音成功', `角色【${payload.name}】已成功锁定，全剧长相与声线已同步！`);
+          } catch (e) {
+            showNotice('保存失败', '网络或服务端异常');
+          } finally {
+            isSavingChar.value = false;
+          }
+        };
+
+        const deleteCharacter = async (name) => {
+          if (!confirm(`确定删除角色【${name}】吗？`)) return;
+          try {
+            const res = await fetch(`/api/characters/${encodeURIComponent(name)}`, { method: 'DELETE' });
+            const data = await res.json();
+            if (data.characters) {
+              project.value.characters = data.characters;
+            }
+            editingCharacter.value = null;
+            showNotice('提示', `角色【${name}】已删除`);
+          } catch (e) {
+            showNotice('删除失败', '网络错误');
+          }
+        };
+
         onMounted(() => {
+          fetchVoices();
+
           fetchProject();
           fetchSeries();
           fetchSotaStatus();
@@ -1362,7 +1542,15 @@
           isCheckingQuality,
           qualityData,
           openQualityModal,
-          runQualityCheck
+          runQualityCheck,
+          editingCharacter,
+          availableVoices,
+          isPlayingSample,
+          isSavingChar,
+          openCharacterEdit,
+          testVoiceSample,
+          saveCharacterEdit,
+          deleteCharacter
         };
       }
     }).mount('#app');
