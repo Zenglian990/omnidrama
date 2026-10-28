@@ -735,9 +735,10 @@ async def _generate_single_shot_visual(
             sp = VolcengineSeedanceProvider(api_key=ark_key)
             seedance_job = shots_dir / f"shot_{sid:03d}_seedance_job.json"
             seedance_out = shots_dir / f"seedance_vid_{sid:03d}.mp4"
+            seedance_input_prompt = shot.get("seedance_prompt") or visual_prompt
             tid = await asyncio.to_thread(
                 sp.create_generation_task,
-                visual_prompt,
+                seedance_input_prompt,
                 ai_gen_source_path,
                 "9:16",
                 "720p",
@@ -949,7 +950,10 @@ async def _run_production_pipeline(req: Optional[RenderRequest]):
                     "visual_prompt": s.visual_prompt,
                     "image": f"/api/shots/{s.shot_id}/image",
                     "audio": f"/api/shots/{s.shot_id}/audio",
-                    "sfx": "惊雷劈裂 (Thunder)" if "SHAKE" in m_val else "无"
+                    "sfx": getattr(s, "sfx", "") or ("惊雷劈裂 (Thunder)" if "SHAKE" in m_val else "无"),
+                    "action_beat": getattr(s, "action_beat", ""),
+                    "seedance_prompt": getattr(s, "seedance_prompt", ""),
+                    "duration": getattr(s, "duration_seconds", None)
                 })
         elif req and req.shots and len(req.shots) > 0:
             shots_list = req.shots
@@ -1577,7 +1581,10 @@ async def generate_script_endpoint(req: GenerateScriptRequest):
             "visual_prompt": s.visual_prompt,
             "image": f"/api/shots/{s.shot_id}/image",
             "audio": f"/api/shots/{s.shot_id}/audio",
-            "sfx": "惊雷劈裂 (Thunder)" if "SHAKE" in m_val else "无"
+            "sfx": getattr(s, "sfx", "") or ("惊雷劈裂 (Thunder)" if "SHAKE" in m_val else "无"),
+            "action_beat": getattr(s, "action_beat", ""),
+            "seedance_prompt": getattr(s, "seedance_prompt", ""),
+            "duration": getattr(s, "duration_seconds", None)
         })
 
     final_mp4 = OUTPUT_DIR / req.title / f"{req.title}_影视级成片.mp4"

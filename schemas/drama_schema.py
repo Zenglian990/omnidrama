@@ -29,6 +29,8 @@ class CharacterAsset(BaseModel):
     visual_tags: str = Field(..., description="锁脸与外观特征Tag，用于保持图像一致性")
     voice_name: str = Field(default="zh-CN-YunxiNeural", description="绑定的edge-tts音色代号")
     bio: Optional[str] = Field(default="", description="角色人设背景")
+    visual_anchor: Optional[str] = Field(default="", description="正面全身物理特征锚点（发型、面容、服装主色调、配饰）")
+    voice_prompt: Optional[str] = Field(default="", description="角色专属音色与情绪提示词")
 
 
 class Shot(BaseModel):
@@ -38,6 +40,10 @@ class Shot(BaseModel):
     speaker: str = Field(default="旁白", description="说话人姓名")
     dialogue: str = Field(..., description="台词或旁白文本")
     visual_prompt: str = Field(..., description="分镜画面生图提示词 (含风格与人物外观约束)")
+    action_beat: Optional[str] = Field(default="", description="动作节拍/画面关键事件")
+    sfx: Optional[str] = Field(default="", description="环境音效/拟声动作声")
+    blocking: Optional[str] = Field(default="", description="人物关系与构图走位")
+    seedance_prompt: Optional[str] = Field(default="", description="字节火山Seedance 2.0官方结构化多模态分镜词")
     duration_seconds: Optional[float] = Field(default=None, description="镜头时长（秒），由语音生成时长决定")
     image_path: Optional[str] = Field(default=None, description="生成的画面静图路径")
     audio_path: Optional[str] = Field(default=None, description="生成的语音音频路径")
