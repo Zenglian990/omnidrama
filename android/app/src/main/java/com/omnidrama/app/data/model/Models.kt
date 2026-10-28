@@ -22,7 +22,9 @@ data class ShotItem(
     val image: String,
     val audio: String,
     val sfx: String,
-    val visual_prompt: String = ""
+    val visual_prompt: String = "",
+    val action_beat: String = "",
+    val seedance_prompt: String = ""
 )
 
 data class CharacterItem(
@@ -30,7 +32,8 @@ data class CharacterItem(
     val role: String,
     val voice: String,
     val avatar: String,
-    val traits: String
+    val traits: String,
+    val visual_anchor: String = ""
 )
 
 data class AudioTrackItem(
