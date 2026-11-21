@@ -1,0 +1,16 @@
+.git
+.github
+.venv
+venv
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache
+tests
+android
+output
+temp
+config/colab_pool_tokens.json
+config/colab_oauth_pending.json
+.env

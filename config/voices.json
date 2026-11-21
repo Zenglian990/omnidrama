@@ -1,0 +1,40 @@
+{
+  "voices": {
+    "男主角": {
+      "voice_id": "zh-CN-YunxiNeural",
+      "description": "云希：磁性沉稳，适合霸道总裁、龙王、修真男主及通用短剧旁白",
+      "rate": "+0%",
+      "pitch": "+0Hz"
+    },
+    "女主角": {
+      "voice_id": "zh-CN-XiaoxiaoNeural",
+      "description": "晓晓：温柔清澈，适合大女主、都市言情女主角",
+      "rate": "+0%",
+      "pitch": "+0Hz"
+    },
+    "反派男配": {
+      "voice_id": "zh-CN-YunjianNeural",
+      "description": "云健：浑厚阴沉，适合反派、冷酷对手、神秘老者",
+      "rate": "-5%",
+      "pitch": "-5Hz"
+    },
+    "少女/妹妹": {
+      "voice_id": "zh-CN-XiaoyiNeural",
+      "description": "晓伊：活泼灵动，适合妹妹、古灵精怪少女",
+      "rate": "+5%",
+      "pitch": "+5Hz"
+    },
+    "成熟大叔": {
+      "voice_id": "zh-CN-YunyangNeural",
+      "description": "云扬：严肃庄重，适合长辈、掌门、商界大佬",
+      "rate": "-3%",
+      "pitch": "-2Hz"
+    },
+    "旁白": {
+      "voice_id": "zh-CN-YunxiNeural",
+      "description": "经典推文与漫剧爆款叙事音色",
+      "rate": "+10%",
+      "pitch": "+0Hz"
+    }
+  }
+}
