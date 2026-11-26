@@ -1,5 +1,6 @@
 package com.omnidrama.app.ui.components
 
+import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -11,6 +12,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Key
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.RadioButtonUnchecked
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -25,17 +27,24 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import com.omnidrama.app.data.model.SotaStatusResponse
 import com.omnidrama.app.ui.theme.*
+import kotlinx.coroutines.launch
 
 @Composable
 fun SotaEngineDialog(
     sotaInfo: SotaStatusResponse,
     currentServerUrl: String,
+    currentAuthToken: String = "",
     isSaving: Boolean = false,
-    onSaveConfig: (serverUrl: String, apiKeys: Map<String, String>) -> Unit,
+    onTestApiKey: (suspend (envKey: String, inputKey: String) -> Pair<Boolean, String>)? = null,
+    onSaveConfig: (serverUrl: String, authToken: String, apiKeys: Map<String, String>) -> Unit,
     onDismiss: () -> Unit
 ) {
     var serverUrl by remember { mutableStateOf(currentServerUrl) }
+    var authToken by remember { mutableStateOf(currentAuthToken) }
     val keyInputs = remember { mutableStateMapOf<String, String>() }
+    val testingMap = remember { mutableStateMapOf<String, Boolean>() }
+    val dialogScope = rememberCoroutineScope()
+    val dialogContext = androidx.compose.ui.platform.LocalContext.current
 
     val configuredCount = sotaInfo.providers.values.count { it.configured }
     val totalCount = sotaInfo.providers.size
@@ -107,6 +116,45 @@ fun SotaEngineDialog(
                 ) {
                     Text("⚡ 填入谷歌云官方制片机房 (asia-east1)", fontSize = 11.5.sp, color = BrandCyan)
                 }
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                // 云端服务器强鉴权锁门密钥输入 (API_AUTH_TOKEN)
+                Text(
+                    text = "🔒 云端访问密钥 (API_AUTH_TOKEN，生产锁门必填):",
+                    color = AccentGold,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.SemiBold
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                OutlinedTextField(
+                    value = authToken,
+                    onValueChange = { authToken = it },
+                    singleLine = true,
+                    placeholder = {
+                        Text(
+                            text = "粘贴服务器 API_AUTH_TOKEN 访问密钥...",
+                            color = TextMuted,
+                            fontSize = 11.sp
+                        )
+                    },
+                    leadingIcon = {
+                        Icon(
+                            imageVector = Icons.Default.Lock,
+                            contentDescription = null,
+                            tint = if (authToken.isNotBlank()) AccentEmerald else AccentGold,
+                            modifier = Modifier.size(15.dp)
+                        )
+                    },
+                    textStyle = LocalTextStyle.current.copy(fontSize = 11.5.sp, fontFamily = FontFamily.Monospace),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = TextPrimary,
+                        unfocusedTextColor = TextPrimary,
+                        focusedBorderColor = AccentGold,
+                        unfocusedBorderColor = BorderDark
+                    ),
+                    modifier = Modifier.fillMaxWidth()
+                )
 
                 Spacer(modifier = Modifier.height(10.dp))
 
@@ -189,6 +237,32 @@ fun SotaEngineDialog(
                                                 fontSize = 10.sp,
                                                 fontWeight = FontWeight.Bold
                                             )
+                                            if (onTestApiKey != null) {
+                                                Spacer(modifier = Modifier.width(6.dp))
+                                                val isTesting = testingMap[provider.env_key] == true
+                                                Text(
+                                                    text = if (isTesting) "测活中" else "⚡测活",
+                                                    color = BrandCyan,
+                                                    fontSize = 10.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    modifier = Modifier
+                                                        .clip(RoundedCornerShape(4.dp))
+                                                        .background(Color(0xFF0E293B))
+                                                        .clickable(enabled = !isTesting) {
+                                                            dialogScope.launch {
+                                                                testingMap[provider.env_key] = true
+                                                                val (ok, msg) = onTestApiKey(provider.env_key, currentInput)
+                                                                testingMap[provider.env_key] = false
+                                                                Toast.makeText(
+                                                                    dialogContext,
+                                                                    "${if (ok) "✅" else "❌"} ${provider.env_key}: $msg",
+                                                                    Toast.LENGTH_LONG
+                                                                ).show()
+                                                            }
+                                                        }
+                                                        .padding(horizontal = 5.dp, vertical = 2.dp)
+                                                )
+                                            }
                                             Spacer(modifier = Modifier.width(6.dp))
                                             Text(
                                                 text = "清除",
@@ -291,7 +365,7 @@ fun SotaEngineDialog(
                             val savedLocal = com.omnidrama.app.data.local.LocalAndroidEngine.getSavedApiKeys(context)
                             cleanKeys.putAll(savedLocal)
                         }
-                        onSaveConfig(serverUrl.trim(), cleanKeys)
+                        onSaveConfig(serverUrl.trim(), authToken.trim(), cleanKeys)
                     },
                     enabled = !isSaving,
                     colors = ButtonDefaults.buttonColors(containerColor = BrandCyan),

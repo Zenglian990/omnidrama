@@ -15,6 +15,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -144,6 +145,12 @@ fun downloadVideoToPhone(context: Context, videoPathOrUrl: String, serverUrl: St
             .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
             .setDestinationInExternalPublicDir(Environment.DIRECTORY_MOVIES, fileName)
             .addRequestHeader("Bypass-Tunnel-Reminder", "true")
+            .apply {
+                val token = LocalAndroidEngine.activeServerAuthToken.trim()
+                if (token.isNotEmpty()) {
+                    addRequestHeader("Authorization", "Bearer $token")
+                }
+            }
             .setAllowedOverMetered(true)
             .setAllowedOverRoaming(true)
 
@@ -167,6 +174,11 @@ fun StudioScreen() {
         val effective = if (saved.isBlank() || saved.contains("loca.lt")) "https://omnidrama-79709693345.asia-east1.run.app" else saved
         mutableStateOf(effective)
     }
+    var serverAuthToken by remember {
+        mutableStateOf(LocalAndroidEngine.getServerAuthToken(context))
+    }
+    var showLocalizeDialog by remember { mutableStateOf(false) }
+    var isLocalizing by remember { mutableStateOf(false) }
     var project by remember { mutableStateOf(ProjectData()) }
     var creatorWorks by remember { mutableStateOf<List<ProjectData>>(emptyList()) }
     var sotaInfo by remember { mutableStateOf(SotaStatusResponse()) }
@@ -225,7 +237,12 @@ fun StudioScreen() {
                         val titleDesc = if (p.title.isNotBlank()) "当前作品《${p.title}》" else "作品库为空"
                         Toast.makeText(context, "✅ 远程机房已连接！$titleDesc，已配置 $confCount 项 API Key", Toast.LENGTH_SHORT).show()
                     } else {
-                        Toast.makeText(context, "📱 当前为【手机独立算力模式】（支持番茄小说直连、手机TTS配音与本地MP4硬件压制）", Toast.LENGTH_LONG).show()
+                        val hint = if (serverUrl.isNotBlank() && serverAuthToken.isBlank()) {
+                            "🔒 云端已启用强鉴权锁门，请点右上角【密钥设置】填入服务器访问密钥（当前已切换手机离线模式）"
+                        } else {
+                            "📱 当前为【手机独立算力模式】（支持番茄小说直连、手机TTS配音与本地MP4硬件压制）"
+                        }
+                        Toast.makeText(context, hint, Toast.LENGTH_LONG).show()
                     }
                 }
             } catch (e: Exception) {
@@ -793,6 +810,22 @@ fun StudioScreen() {
                                     }
 
                                     Button(
+                                        onClick = { showLocalizeDialog = true },
+                                        enabled = !isLocalizing,
+                                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0E293B)),
+                                        contentPadding = PaddingValues(horizontal = 7.dp, vertical = 4.dp),
+                                        shape = RoundedCornerShape(6.dp),
+                                        modifier = Modifier.height(28.dp)
+                                    ) {
+                                        Text(
+                                            if (isLocalizing) "译制中..." else "🌍 出海",
+                                            color = Color(0xFF38BDF8),
+                                            fontSize = 10.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+
+                                    Button(
                                         onClick = { showProductionStudioDialog = true },
                                         colors = ButtonDefaults.buttonColors(containerColor = AccentGold),
                                         contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
@@ -812,7 +845,7 @@ fun StudioScreen() {
                                 modifier = Modifier.fillMaxSize(),
                                 verticalArrangement = Arrangement.spacedBy(10.dp)
                             ) {
-                                items(project.shots, key = { it.id }) { shot ->
+                                itemsIndexed(project.shots, key = { _, it -> it.id }) { idx, shot ->
                                     StoryboardCard(
                                         projectTitle = project.title,
                                         projectGenre = project.genre,
@@ -820,6 +853,48 @@ fun StudioScreen() {
                                         serverUrl = serverUrl,
                                         isSelected = editingShot?.id == shot.id,
                                         refreshVersion = shotRefreshVersion,
+                                        canMoveUp = idx > 0,
+                                        canMoveDown = idx < project.shots.lastIndex,
+                                        onMoveUp = {
+                                            if (idx > 0) {
+                                                scope.launch {
+                                                    val mutable = project.shots.toMutableList()
+                                                    val tmp = mutable[idx - 1]
+                                                    mutable[idx - 1] = mutable[idx]
+                                                    mutable[idx] = tmp
+                                                    val orderedIds = mutable.map { it.id }
+                                                    val remoteUpdated = repo.reorderShotsOnServer(context, serverUrl, orderedIds)
+                                                    val finalProj = remoteUpdated ?: project.copy(
+                                                        shots = mutable.mapIndexed { i, s -> s.copy(id = i + 1) }
+                                                    )
+                                                    project = finalProj
+                                                    LocalAndroidEngine.saveCreatorWork(context, finalProj)
+                                                    creatorWorks = withContext(Dispatchers.IO) { LocalAndroidEngine.getCreatorWorks(context) }
+                                                    shotRefreshVersion += 1
+                                                    Toast.makeText(context, "↑ 已上移分镜顺序", Toast.LENGTH_SHORT).show()
+                                                }
+                                            }
+                                        },
+                                        onMoveDown = {
+                                            if (idx < project.shots.lastIndex) {
+                                                scope.launch {
+                                                    val mutable = project.shots.toMutableList()
+                                                    val tmp = mutable[idx + 1]
+                                                    mutable[idx + 1] = mutable[idx]
+                                                    mutable[idx] = tmp
+                                                    val orderedIds = mutable.map { it.id }
+                                                    val remoteUpdated = repo.reorderShotsOnServer(context, serverUrl, orderedIds)
+                                                    val finalProj = remoteUpdated ?: project.copy(
+                                                        shots = mutable.mapIndexed { i, s -> s.copy(id = i + 1) }
+                                                    )
+                                                    project = finalProj
+                                                    LocalAndroidEngine.saveCreatorWork(context, finalProj)
+                                                    creatorWorks = withContext(Dispatchers.IO) { LocalAndroidEngine.getCreatorWorks(context) }
+                                                    shotRefreshVersion += 1
+                                                    Toast.makeText(context, "↓ 已下移分镜顺序", Toast.LENGTH_SHORT).show()
+                                                }
+                                            }
+                                        },
                                         onClick = {
                                             editingShot = shot
                                         }
@@ -829,27 +904,29 @@ fun StudioScreen() {
                                 item {
                                     Button(
                                         onClick = {
-                                            val nextId = project.shots.size + 1
-                                            val newShot = ShotItem(
-                                                id = nextId,
-                                                speaker = "旁白",
-                                                scale = "特写",
-                                                motion = "ZOOM_IN",
-                                                motion_name = "镜头推进",
-                                                dialogue = "此时此刻，命运的齿轮悄然转动……",
-                                                image = "",
-                                                audio = "",
-                                                sfx = "重低音渲染",
-                                                visual_prompt = "8k cinematic vertical frame, dramatic lighting, intense short drama scene"
-                                            )
-                                            val updatedShots = project.shots + newShot
-                                            val updatedProj = project.copy(shots = updatedShots)
-                                            project = updatedProj
-                                            LocalAndroidEngine.saveCreatorWork(context, updatedProj)
-                                            creatorWorks = LocalAndroidEngine.getCreatorWorks(context)
-                                            shotRefreshVersion += 1
-                                            editingShot = newShot
-                                            Toast.makeText(context, "➕ 已添加新分镜镜头 #$nextId，可直接调整台词与画面提示词", Toast.LENGTH_SHORT).show()
+                                            scope.launch {
+                                                val nextId = project.shots.size + 1
+                                                val newShot = ShotItem(
+                                                    id = nextId,
+                                                    speaker = "旁白",
+                                                    scale = "特写",
+                                                    motion = "ZOOM_IN",
+                                                    motion_name = "镜头推进",
+                                                    dialogue = "此时此刻，命运的齿轮悄然转动……",
+                                                    image = "",
+                                                    audio = "",
+                                                    sfx = "重低音渲染",
+                                                    visual_prompt = "8k cinematic vertical frame, dramatic lighting, intense short drama scene"
+                                                )
+                                                val remoteUpdated = repo.addShotOnServer(context, serverUrl, newShot)
+                                                val updatedProj = remoteUpdated ?: project.copy(shots = project.shots + newShot)
+                                                project = updatedProj
+                                                LocalAndroidEngine.saveCreatorWork(context, updatedProj)
+                                                creatorWorks = withContext(Dispatchers.IO) { LocalAndroidEngine.getCreatorWorks(context) }
+                                                shotRefreshVersion += 1
+                                                editingShot = updatedProj.shots.lastOrNull() ?: newShot
+                                                Toast.makeText(context, "➕ 已添加新分镜镜头 #${updatedProj.shots.size}，可直接调整台词与画面提示词", Toast.LENGTH_SHORT).show()
+                                            }
                                         },
                                         modifier = Modifier
                                             .fillMaxWidth()
@@ -1126,17 +1203,88 @@ fun StudioScreen() {
         )
     }
 
+    // 🌍 一键出海译制语言选择弹窗
+    if (showLocalizeDialog) {
+        val langOptions = listOf(
+            "en" to "🇺🇸 英语出海 (English + 美式母语配音)",
+            "ja" to "🇯🇵 日语出海 (日本語 + 日式声优配音)",
+            "ko" to "🇰🇷 韩语出海 (한국어 + 韩剧母语配音)",
+            "zh" to "🇨🇳 还原中文 (简体中文 + 中文配音)"
+        )
+        AlertDialog(
+            onDismissRequest = { if (!isLocalizing) showLocalizeDialog = false },
+            title = {
+                Text("🌍 一键出海译制全剧", color = TextPrimary, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        text = "自动将全剧台词与角色名译为目标语种，并切换微软母语声线（需已连接云端机房）：",
+                        color = TextSecondary,
+                        fontSize = 11.5.sp
+                    )
+                    langOptions.forEach { (code, label) ->
+                        OutlinedButton(
+                            onClick = {
+                                showLocalizeDialog = false
+                                scope.launch {
+                                    isLocalizing = true
+                                    Toast.makeText(context, "🌍 正在一键出海译制 ($code)...", Toast.LENGTH_SHORT).show()
+                                    val (updatedProj, msg) = repo.localizeProject(context, serverUrl, code)
+                                    isLocalizing = false
+                                    if (updatedProj != null && updatedProj.title.isNotBlank()) {
+                                        project = updatedProj
+                                        LocalAndroidEngine.saveCreatorWork(context, updatedProj)
+                                        creatorWorks = withContext(Dispatchers.IO) { LocalAndroidEngine.getCreatorWorks(context) }
+                                        shotRefreshVersion += 1
+                                        Toast.makeText(context, "✅ $msg", Toast.LENGTH_LONG).show()
+                                    } else {
+                                        Toast.makeText(context, "⚠️ $msg", Toast.LENGTH_LONG).show()
+                                    }
+                                }
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Text(label, color = BrandCyan, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showLocalizeDialog = false }) {
+                    Text("取消", color = TextSecondary)
+                }
+            },
+            containerColor = CardDark
+        )
+    }
+
     // 真实 API 密钥与引擎设置弹窗
     if (showSotaDialog) {
         SotaEngineDialog(
             sotaInfo = sotaInfo,
             currentServerUrl = serverUrl,
+            currentAuthToken = serverAuthToken,
             isSaving = isSavingKeys,
-            onSaveConfig = { newUrl, apiKeys ->
+            onTestApiKey = { envKey, rawInput ->
+                repo.testSotaApiKey(serverUrl, envKey, rawInput)
+            },
+            onSaveConfig = { newUrl, newAuthToken, apiKeys ->
                 scope.launch {
                     isSavingKeys = true
                     serverUrl = newUrl
+                    serverAuthToken = newAuthToken
                     prefs.edit().putString("server_url", newUrl).apply()
+                    LocalAndroidEngine.saveServerAuthToken(context, newAuthToken)
+
+                    var authHint = ""
+                    if (newUrl.isNotBlank() && newAuthToken.isNotBlank()) {
+                        val (authOk, authMsg) = repo.verifyServerAuthToken(newUrl, newAuthToken)
+                        if (!authOk) {
+                            authHint = "（⚠️ 鉴权未通过：$authMsg）"
+                        }
+                    }
 
                     if (apiKeys.isNotEmpty()) {
                         repo.saveApiKeys(context, newUrl, apiKeys)
@@ -1152,12 +1300,16 @@ fun StudioScreen() {
                         Toast.makeText(
                             context,
                             if (isOnline) "✅ 已成功保存 ${apiKeys.size} 项真实 API 密钥至服务器与手机本地！"
-                            else "✅ 已保存 ${apiKeys.size} 项 API 密钥至手机本地直连引擎！",
+                            else "✅ 已保存 ${apiKeys.size} 项 API 密钥至手机本地直连引擎！$authHint",
                             Toast.LENGTH_LONG
                         ).show()
                     } else {
-                        showSotaDialog = false
-                        refreshData(showToast = true)
+                        if (authHint.isNotBlank()) {
+                            Toast.makeText(context, "🔒 服务器连接校验失败$authHint", Toast.LENGTH_LONG).show()
+                        } else {
+                            showSotaDialog = false
+                            refreshData(showToast = true)
+                        }
                     }
                 }
             },
@@ -1200,15 +1352,19 @@ fun StudioScreen() {
                 }
             },
             onDeleteShot = { delId ->
-                val newShots = project.shots.filter { it.id != delId }
-                    .mapIndexed { index, s -> s.copy(id = index + 1) }
-                val updatedProj = project.copy(shots = newShots)
-                project = updatedProj
-                LocalAndroidEngine.saveCreatorWork(context, updatedProj)
-                creatorWorks = LocalAndroidEngine.getCreatorWorks(context)
-                shotRefreshVersion += 1
-                editingShot = null
-                Toast.makeText(context, "🗑️ 已删除镜头 #$delId，分镜已重新按序排列", Toast.LENGTH_SHORT).show()
+                scope.launch {
+                    val remoteUpdated = repo.deleteShotOnServer(context, serverUrl, delId)
+                    val updatedProj = remoteUpdated ?: project.copy(
+                        shots = project.shots.filter { it.id != delId }
+                            .mapIndexed { index, s -> s.copy(id = index + 1) }
+                    )
+                    project = updatedProj
+                    LocalAndroidEngine.saveCreatorWork(context, updatedProj)
+                    creatorWorks = withContext(Dispatchers.IO) { LocalAndroidEngine.getCreatorWorks(context) }
+                    shotRefreshVersion += 1
+                    editingShot = null
+                    Toast.makeText(context, "🗑️ 已删除镜头 #$delId，分镜已重新按序排列", Toast.LENGTH_SHORT).show()
+                }
             },
             onDismiss = {
                 if (!isSavingShot) {

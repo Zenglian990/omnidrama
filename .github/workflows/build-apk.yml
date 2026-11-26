@@ -1,0 +1,75 @@
+name: Build & Release Android APK
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'android/**'
+      - '.github/workflows/build-apk.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-apk:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x android/gradlew
+
+      - name: Run Android unit tests
+        working-directory: android
+        run: ./gradlew testDebugUnitTest --stacktrace
+
+      - name: Build release APK
+        working-directory: android
+        run: ./gradlew assembleRelease --stacktrace
+
+      - name: Prepare versioned APK asset
+        id: version
+        run: |
+          VERSION_NAME=$(grep -E 'versionName' android/app/build.gradle | head -n 1 | sed -E 's/.*"([^"]+)".*/\1/')
+          echo "version_name=${VERSION_NAME}" >> "$GITHUB_OUTPUT"
+          APK_SRC="android/app/build/outputs/apk/release/app-release.apk"
+          if [ ! -f "$APK_SRC" ]; then
+            APK_SRC=$(find android/app/build/outputs/apk/release -name "*.apk" | head -n 1)
+          fi
+          cp "$APK_SRC" "omnidrama-v${VERSION_NAME}.apk"
+          ls -lh "omnidrama-v${VERSION_NAME}.apk"
+
+      - name: Upload APK workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: omnidrama-v${{ steps.version.outputs.version_name }}-apk
+          path: omnidrama-v${{ steps.version.outputs.version_name }}.apk
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.version.outputs.version_name }}
+          name: OmniDrama Studio Android v${{ steps.version.outputs.version_name }}
+          body: |
+            ## OmniDrama Studio Android v${{ steps.version.outputs.version_name }}
+
+            - 新增云端强鉴权锁门支持（`API_AUTH_TOKEN` 全局 Bearer 注入，覆盖全部 API、分镜图、ExoPlayer 视频流、MP4 下载与番茄代理）
+            - 新增「🌍 一键出海译制」全剧多语种译制（EN / JA / KO / ZH）与母语声线切换
+            - 新增分镜卡片上下调序（`↑ / ↓`）及增删云端同步，彻底防串镜
+            - 新增 SOTA 商业 API Key「⚡ 测活」实时验证按钮
+          files: omnidrama-v${{ steps.version.outputs.version_name }}.apk
+          make_latest: true

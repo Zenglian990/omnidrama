@@ -17,12 +17,187 @@ class DramaRepository {
         .connectTimeout(15, TimeUnit.SECONDS)
         .readTimeout(90, TimeUnit.SECONDS)
         .addInterceptor { chain ->
-            val newReq = chain.request().newBuilder()
+            val orig = chain.request()
+            val builder = orig.newBuilder()
                 .addHeader("Bypass-Tunnel-Reminder", "true")
-                .build()
-            chain.proceed(newReq)
+            val token = LocalAndroidEngine.activeServerAuthToken.trim()
+            if (token.isNotEmpty() && orig.header("Authorization") == null) {
+                builder.addHeader("Authorization", "Bearer $token")
+            }
+            chain.proceed(builder.build())
         }
         .build()
+
+    /**
+     * 校验云端服务器锁门密钥（API_AUTH_TOKEN），验证通过返回 true.
+     */
+    suspend fun verifyServerAuthToken(baseUrl: String, token: String): Pair<Boolean, String> = withContext(Dispatchers.IO) {
+        val cleanUrl = baseUrl.trim().removeSuffix("/")
+        if (cleanUrl.isBlank()) return@withContext Pair(false, "服务器地址为空")
+        try {
+            val payload = gson.toJson(mapOf("token" to token.trim()))
+            val req = Request.Builder()
+                .url("$cleanUrl/api/auth/session")
+                .post(payload.toRequestBody("application/json".toMediaType()))
+                .build()
+            client.newCall(req).execute().use { resp ->
+                if (resp.isSuccessful) {
+                    return@withContext Pair(true, "鉴权校验通过")
+                }
+                val code = resp.code
+                return@withContext Pair(false, if (code == 401) "访问密钥错误 (401)" else "服务器返回 HTTP $code")
+            }
+        } catch (e: Exception) {
+            return@withContext Pair(false, "无法连接云端: ${e.localizedMessage ?: "网络异常"}")
+        }
+    }
+
+    /**
+     * 实时测活单个 SOTA 模型 API Key（直连后端 /api/sota/test-key）.
+     */
+    suspend fun testSotaApiKey(baseUrl: String, envKey: String, apiKey: String = ""): Pair<Boolean, String> = withContext(Dispatchers.IO) {
+        val cleanUrl = baseUrl.trim().removeSuffix("/")
+        if (cleanUrl.isBlank()) return@withContext Pair(false, "未配置云端机房地址")
+        try {
+            val payload = gson.toJson(mapOf("env_key" to envKey, "api_key" to apiKey.trim()))
+            val req = Request.Builder()
+                .url("$cleanUrl/api/sota/test-key")
+                .post(payload.toRequestBody("application/json".toMediaType()))
+                .build()
+            client.newCall(req).execute().use { resp ->
+                val body = resp.body?.string() ?: ""
+                if (resp.code == 401) {
+                    return@withContext Pair(false, "未通过服务器鉴权 (401)，请先填写云端访问密钥")
+                }
+                if (body.trim().startsWith("{")) {
+                    val obj = com.google.gson.JsonParser.parseString(body).asJsonObject
+                    val ok = obj.get("ok")?.asBoolean == true
+                    val msg = obj.get("message")?.asString ?: obj.get("detail")?.asString ?: if (ok) "密钥可用" else "测活失败"
+                    return@withContext Pair(ok, msg)
+                }
+                return@withContext Pair(resp.isSuccessful, "HTTP ${resp.code}")
+            }
+        } catch (e: Exception) {
+            return@withContext Pair(false, "测活请求异常: ${e.localizedMessage ?: "网络超时"}")
+        }
+    }
+
+    /**
+     * 一键出海译制（调用后端 /api/project/localize，支持 en/ja/ko/zh）.
+     */
+    suspend fun localizeProject(
+        context: Context,
+        baseUrl: String,
+        targetLang: String
+    ): Pair<ProjectData?, String> = withContext(Dispatchers.IO) {
+        val cleanUrl = baseUrl.trim().removeSuffix("/")
+        if (cleanUrl.isBlank()) return@withContext Pair(null, "请先配置并连接云端机房后再使用出海译制")
+        try {
+            val payload = gson.toJson(mapOf("target_lang" to targetLang, "auto_switch_voices" to true))
+            val req = Request.Builder()
+                .url("$cleanUrl/api/project/localize")
+                .post(payload.toRequestBody("application/json".toMediaType()))
+                .build()
+            client.newCall(req).execute().use { resp ->
+                val body = resp.body?.string() ?: ""
+                if (resp.code == 401) {
+                    return@withContext Pair(null, "服务器鉴权失败 (401)，请在设置中填写正确的云端访问密钥")
+                }
+                if (resp.isSuccessful) {
+                    val updated = getProject(context, cleanUrl)
+                    val msg = try {
+                        val obj = com.google.gson.JsonParser.parseString(body).asJsonObject
+                        obj.get("message")?.asString ?: "出海译制完成"
+                    } catch (_: Exception) {
+                        "出海译制完成"
+                    }
+                    return@withContext Pair(updated, msg)
+                }
+                val errDetail = try {
+                    com.google.gson.JsonParser.parseString(body).asJsonObject.get("detail")?.asString
+                } catch (_: Exception) {
+                    null
+                }
+                return@withContext Pair(null, errDetail ?: "出海译制失败 (HTTP ${resp.code})")
+            }
+        } catch (e: Exception) {
+            return@withContext Pair(null, "出海译制网络异常: ${e.localizedMessage ?: "连接超时"}")
+        }
+    }
+
+    /**
+     * 云端同步新增分镜（失败时返回 null 由调用方降级本地保存）.
+     */
+    suspend fun addShotOnServer(context: Context, baseUrl: String, shot: ShotItem): ProjectData? = withContext(Dispatchers.IO) {
+        val cleanUrl = baseUrl.trim().removeSuffix("/")
+        if (cleanUrl.isBlank()) return@withContext null
+        try {
+            val payload = gson.toJson(
+                mapOf(
+                    "speaker" to shot.speaker,
+                    "dialogue" to shot.dialogue,
+                    "visual_prompt" to shot.visual_prompt,
+                    "motion" to shot.motion,
+                    "scale" to shot.scale,
+                    "sfx" to shot.sfx
+                )
+            )
+            val req = Request.Builder()
+                .url("$cleanUrl/api/shots")
+                .post(payload.toRequestBody("application/json".toMediaType()))
+                .build()
+            client.newCall(req).execute().use { resp ->
+                if (resp.isSuccessful) {
+                    return@withContext getProject(context, cleanUrl)
+                }
+            }
+        } catch (_: Exception) {
+        }
+        return@withContext null
+    }
+
+    /**
+     * 云端同步删除分镜（防串镜、自动顺延磁盘资产编号）.
+     */
+    suspend fun deleteShotOnServer(context: Context, baseUrl: String, shotId: Int): ProjectData? = withContext(Dispatchers.IO) {
+        val cleanUrl = baseUrl.trim().removeSuffix("/")
+        if (cleanUrl.isBlank()) return@withContext null
+        try {
+            val req = Request.Builder()
+                .url("$cleanUrl/api/shots/$shotId")
+                .delete()
+                .build()
+            client.newCall(req).execute().use { resp ->
+                if (resp.isSuccessful) {
+                    return@withContext getProject(context, cleanUrl)
+                }
+            }
+        } catch (_: Exception) {
+        }
+        return@withContext null
+    }
+
+    /**
+     * 云端同步重排分镜顺序（三阶段同步对调磁盘图音视频，杜绝串镜）.
+     */
+    suspend fun reorderShotsOnServer(context: Context, baseUrl: String, orderedIds: List<Int>): ProjectData? = withContext(Dispatchers.IO) {
+        val cleanUrl = baseUrl.trim().removeSuffix("/")
+        if (cleanUrl.isBlank()) return@withContext null
+        try {
+            val payload = gson.toJson(mapOf("ordered_ids" to orderedIds))
+            val req = Request.Builder()
+                .url("$cleanUrl/api/shots/reorder")
+                .post(payload.toRequestBody("application/json".toMediaType()))
+                .build()
+            client.newCall(req).execute().use { resp ->
+                if (resp.isSuccessful) {
+                    return@withContext getProject(context, cleanUrl)
+                }
+            }
+        } catch (_: Exception) {
+        }
+        return@withContext null
+    }
 
     private val gson = Gson()
 

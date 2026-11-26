@@ -9,6 +9,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ArrowDownward
+import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Image
@@ -48,6 +50,10 @@ fun StoryboardCard(
     serverUrl: String,
     isSelected: Boolean,
     refreshVersion: Int = 0,
+    canMoveUp: Boolean = false,
+    canMoveDown: Boolean = false,
+    onMoveUp: (() -> Unit)? = null,
+    onMoveDown: (() -> Unit)? = null,
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -81,7 +87,7 @@ fun StoryboardCard(
                 if (serverUrl.isNotBlank()) {
                     try {
                         val imgUrl = "${serverUrl.trimEnd('/')}/api/shots/${shot.id}/image?v=$refreshVersion&t=${shot.dialogue.hashCode()}"
-                        val req = Request.Builder().url(imgUrl).build()
+                        val req = LocalAndroidEngine.applyServerAuth(Request.Builder().url(imgUrl)).build()
                         LocalAndroidEngine.directHttpClient.newBuilder()
                             .connectTimeout(6, java.util.concurrent.TimeUnit.SECONDS)
                             .readTimeout(25, java.util.concurrent.TimeUnit.SECONDS)
@@ -226,19 +232,58 @@ fun StoryboardCard(
                         }
                     }
 
-                    if (shot.sfx != "无" && shot.sfx.isNotBlank()) {
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(4.dp))
-                                .background(Color(0xFF451A03))
-                                .padding(horizontal = 5.dp, vertical = 2.dp)
-                        ) {
-                            Text(
-                                text = shot.sfx,
-                                color = AccentGold,
-                                fontSize = 9.sp,
-                                fontWeight = FontWeight.Medium
-                            )
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        if (shot.sfx != "无" && shot.sfx.isNotBlank()) {
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(4.dp))
+                                    .background(Color(0xFF451A03))
+                                    .padding(horizontal = 5.dp, vertical = 2.dp)
+                            ) {
+                                Text(
+                                    text = shot.sfx,
+                                    color = AccentGold,
+                                    fontSize = 9.sp,
+                                    fontWeight = FontWeight.Medium
+                                )
+                            }
+                        }
+                        if (onMoveUp != null && canMoveUp) {
+                            Box(
+                                modifier = Modifier
+                                    .size(20.dp)
+                                    .clip(RoundedCornerShape(4.dp))
+                                    .background(Color(0xFF1E293B))
+                                    .clickable { onMoveUp() },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.ArrowUpward,
+                                    contentDescription = "上移分镜",
+                                    tint = BrandCyan,
+                                    modifier = Modifier.size(12.dp)
+                                )
+                            }
+                        }
+                        if (onMoveDown != null && canMoveDown) {
+                            Box(
+                                modifier = Modifier
+                                    .size(20.dp)
+                                    .clip(RoundedCornerShape(4.dp))
+                                    .background(Color(0xFF1E293B))
+                                    .clickable { onMoveDown() },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.ArrowDownward,
+                                    contentDescription = "下移分镜",
+                                    tint = BrandCyan,
+                                    modifier = Modifier.size(12.dp)
+                                )
+                            }
                         }
                     }
                 }

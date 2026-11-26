@@ -39,6 +39,7 @@ import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.ui.PlayerView
+import com.omnidrama.app.data.local.LocalAndroidEngine
 import java.io.File
 
 @OptIn(UnstableApi::class)
@@ -55,12 +56,13 @@ fun VideoPlayer(
     var hasError by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf("") }
 
-    val exoPlayer = remember(videoUrl) {
+    val authToken = LocalAndroidEngine.activeServerAuthToken
+    val exoPlayer = remember(videoUrl, authToken) {
         val httpFactory = DefaultHttpDataSource.Factory()
-            .setUserAgent("OmniDrama/1.6")
+            .setUserAgent("OmniDrama/3.5")
             .setConnectTimeoutMs(15000)
             .setReadTimeoutMs(30000)
-            .setDefaultRequestProperties(mapOf("Bypass-Tunnel-Reminder" to "true"))
+            .setDefaultRequestProperties(LocalAndroidEngine.buildServerAuthHeaders(authToken))
 
         // DefaultDataSource.Factory 同时支持 file:// 本地 MP4 与 http/https 远程流！
         val dataSourceFactory = DefaultDataSource.Factory(context, httpFactory)

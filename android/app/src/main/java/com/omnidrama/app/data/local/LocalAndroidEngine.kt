@@ -60,6 +60,42 @@ object LocalAndroidEngine {
     private const val KEY_WORKS_LIST = "creator_works_json"
     private const val KEY_CURRENT_TITLE = "current_work_title"
     private const val KEY_API_KEYS_MAP = "saved_api_keys_json"
+    private const val KEY_SERVER_AUTH_TOKEN = "server_auth_token"
+
+    // 当前生效的云端服务器锁门密钥（由用户配置，绝不硬编码进源码）
+    @Volatile
+    var activeServerAuthToken: String = ""
+
+    fun getServerAuthToken(context: Context): String {
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        val saved = (prefs.getString(KEY_SERVER_AUTH_TOKEN, "") ?: "").trim()
+        activeServerAuthToken = saved
+        return saved
+    }
+
+    fun saveServerAuthToken(context: Context, token: String) {
+        val clean = token.trim()
+        activeServerAuthToken = clean
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        prefs.edit().putString(KEY_SERVER_AUTH_TOKEN, clean).apply()
+    }
+
+    fun buildServerAuthHeaders(token: String = activeServerAuthToken): Map<String, String> {
+        val headers = mutableMapOf("Bypass-Tunnel-Reminder" to "true")
+        val clean = token.trim()
+        if (clean.isNotEmpty()) {
+            headers["Authorization"] = "Bearer $clean"
+        }
+        return headers
+    }
+
+    fun applyServerAuth(builder: Request.Builder, token: String = activeServerAuthToken): Request.Builder {
+        val clean = token.trim()
+        if (clean.isNotEmpty()) {
+            builder.header("Authorization", "Bearer $clean")
+        }
+        return builder
+    }
 
     // 严禁预留任何假小说名字：启动时若发现旧版本遗留的预设剧名则自动清理
     private val BANNED_PRESET_TITLES = setOf(
@@ -503,7 +539,7 @@ object LocalAndroidEngine {
                     val encText = java.net.URLEncoder.encode(cleanDialogue, "UTF-8")
                     val encSpeaker = java.net.URLEncoder.encode(shot.speaker, "UTF-8")
                     val url = "${serverUrl.trimEnd('/')}/api/shots/${shot.id}/audio?text=$encText&speaker=$encSpeaker"
-                    val req = Request.Builder().url(url).build()
+                    val req = applyServerAuth(Request.Builder().url(url)).build()
                     fastClient.newCall(req).execute().use { resp ->
                         if (resp.isSuccessful && resp.header("Content-Type")?.contains("audio") == true) {
                             val bytes = resp.body?.bytes()
@@ -579,7 +615,7 @@ object LocalAndroidEngine {
                     val encVoice = java.net.URLEncoder.encode(voiceName, "UTF-8")
                     val encText = java.net.URLEncoder.encode(sampleText, "UTF-8")
                     val url = "${serverUrl.trimEnd('/')}/api/voices/preview?voice=$encVoice&text=$encText"
-                    val req = Request.Builder().url(url).build()
+                    val req = applyServerAuth(Request.Builder().url(url)).build()
                     fastClient.newCall(req).execute().use { resp ->
                         if (resp.isSuccessful && resp.header("Content-Type")?.contains("audio") == true) {
                             val bytes = resp.body?.bytes()
@@ -713,7 +749,7 @@ object LocalAndroidEngine {
         if (serverUrl.isNotBlank()) {
             try {
                 val fast = directHttpClient.newBuilder().connectTimeout(3, TimeUnit.SECONDS).readTimeout(8, TimeUnit.SECONDS).build()
-                val req = Request.Builder().url("$serverUrl/api/fanqie/rank?limit=6").build()
+                val req = applyServerAuth(Request.Builder().url("$serverUrl/api/fanqie/rank?limit=6")).build()
                 fast.newCall(req).execute().use { resp ->
                     if (resp.isSuccessful) {
                         val body = resp.body?.string()
@@ -784,10 +820,11 @@ object LocalAndroidEngine {
             try {
                 val payload = mapOf("url_or_id" to text)
                 val json = gson.toJson(payload)
-                val req = Request.Builder()
-                    .url("${serverUrl.trimEnd('/')}/api/fanqie/import")
-                    .post(json.toRequestBody("application/json".toMediaType()))
-                    .build()
+                val req = applyServerAuth(
+                    Request.Builder()
+                        .url("${serverUrl.trimEnd('/')}/api/fanqie/import")
+                        .post(json.toRequestBody("application/json".toMediaType()))
+                ).build()
                 val fastClient = directHttpClient.newBuilder()
                     .connectTimeout(5, TimeUnit.SECONDS)
                     .readTimeout(10, TimeUnit.SECONDS)
@@ -871,7 +908,9 @@ object LocalAndroidEngine {
 
         if (serverUrl.isNotBlank()) {
             try {
-                val req = Request.Builder().url("${serverUrl.trimEnd('/')}/api/fanqie/chapter/$chapterId").build()
+                val req = applyServerAuth(
+                    Request.Builder().url("${serverUrl.trimEnd('/')}/api/fanqie/chapter/$chapterId")
+                ).build()
                 directHttpClient.newCall(req).execute().use { resp ->
                     if (resp.isSuccessful) {
                         val body = resp.body?.string() ?: ""
