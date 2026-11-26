@@ -140,6 +140,15 @@ def test_dockerfile_and_frontend_hardening_invariants():
     assert not (PROJECT_ROOT / "assets" / "omnidrama.apk").exists()
     assert not (PROJECT_ROOT / "render_masterpiece.py").exists()
     assert (PROJECT_ROOT / "requirements-prod.txt").exists()
+    assert (PROJECT_ROOT / "web" / "__init__.py").exists()
+    for ignore_name in (".dockerignore", ".gcloudignore"):
+        ignore_lines = [
+            line.strip()
+            for line in (PROJECT_ROOT / ignore_name).read_text(encoding="utf-8").splitlines()
+            if line.strip() and not line.strip().startswith("#")
+        ]
+        # 严禁写无根目录斜杠的裸 "app.py"，否则会递归误杀 web/app.py 导致 Cloud Run 启动报 Could not import module "web.app"
+        assert "app.py" not in ignore_lines, f"{ignore_name} 误含裸 app.py，会递归排除 web/app.py"
 
     html = (PROJECT_ROOT / "web/index.html").read_text(encoding="utf-8")
     assert "全片 61s" not in html

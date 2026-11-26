@@ -23,9 +23,9 @@ assets/*.apk
 *.log
 docker-compose.yml
 cloudrun.yaml
-app.py
-cli.py
-sample_story.txt
+/app.py
+/cli.py
+/sample_story.txt
 config/colab_pool_tokens.json
 config/colab_oauth_pending.json
 .env
