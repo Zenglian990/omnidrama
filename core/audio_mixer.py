@@ -14,6 +14,56 @@ from pathlib import Path
 from typing import List, Dict, Any, Optional
 
 
+def select_bgm_type_for_genre(genre: str) -> str:
+    """根据短剧题材智能选择匹配的影视配乐情绪风格，杜绝甜宠剧配重金属战歌."""
+    g = (genre or "").strip()
+    if any(k in g for k in ["甜宠", "言情", "现言", "恋爱", "青春", "校园", "治愈", "都市情感", "萌宝"]):
+        return "romantic_warm"
+    if any(k in g for k in ["古风", "古言", "仙侠", "修仙", "玄幻", "宫斗", "重生古装", "武侠"]):
+        return "ancient_guofeng"
+    if any(k in g for k in ["悬疑", "刑侦", "商战", "复仇", "豪门", "权谋", "惊悚", "职场", "推理"]):
+        return "suspense_dark"
+    return "epic_battle"
+
+
+def build_sfx_cues_from_shots(shots: List[Dict[str, Any]], genre: str = "") -> List[Dict[str, Any]]:
+    """根据各分镜实际时长累加时间线与镜头 sfx 标签精准打点拟音，避免固定 0.5s 无脑劈雷."""
+    cues: List[Dict[str, Any]] = []
+    cursor = 0.0
+    is_romance = select_bgm_type_for_genre(genre) == "romantic_warm"
+
+    for idx, s in enumerate(shots or []):
+        dur = float(s.get("duration") or s.get("duration_seconds") or 3.5)
+        sfx_raw = str(s.get("sfx") or "").strip()
+        motion = str(s.get("motion") or "").upper()
+        dialogue = str(s.get("dialogue") or "")
+
+        cue_name: Optional[str] = None
+        vol = 0.28
+        if any(k in sfx_raw for k in ["雷", "thunder", "暴雨"]):
+            cue_name, vol = "thunder", 0.30
+        elif any(k in sfx_raw for k in ["剑", "刀", "sword", "金铁"]):
+            cue_name, vol = "sword_clash", 0.28
+        elif any(k in sfx_raw for k in ["轰", "爆", "破门", "撞", "重击", "boom", "impact"]) or "SHAKE" in motion:
+            cue_name, vol = "impact_boom", 0.32
+        elif any(k in sfx_raw for k in ["风", "呼啸", "whoosh", "转场"]):
+            cue_name, vol = "whoosh", 0.24
+        elif not is_romance and idx == 0 and any(k in dialogue for k in ["雨", "雷", "杀", "跪", "战神", "龙王"]):
+            cue_name, vol = "impact_boom", 0.26
+
+        if cue_name and len(cues) < 6:
+            cues.append({
+                "name": cue_name,
+                "time_seconds": round(max(0.15, cursor + 0.2), 2),
+                "volume": vol,
+            })
+        cursor += max(0.8, dur)
+
+    if not cues and not is_romance and shots:
+        cues.append({"name": "whoosh", "time_seconds": 0.3, "volume": 0.22})
+    return cues
+
+
 class AudioMixer:
     def __init__(self, assets_dir: Optional[str] = None):
         if assets_dir is None:
@@ -108,8 +158,45 @@ class AudioMixer:
             if res.returncode == 0 and os.path.exists(output_path):
                 return output_path
 
-        # 使用 aevalsrc 合成柔和的 A小调/D小调电影大提琴和声铺底 + 史诗定音鼓律动 (消除刺耳单频正弦波)
-        if bgm_type == "epic_battle":
+        # 使用 aevalsrc 合成 4 大题材电影级和声铺底（彻底消除单一刺耳正弦波与跨题材串戏）
+        if bgm_type == "romantic_warm":
+            # C大调温暖电钢/弦乐和声 (C4-E4-G4-B4 轻柔起伏)
+            expr = (
+                "0.09*sin(2*PI*261.63*t)*(0.55+0.45*sin(2*PI*0.25*t))"
+                "+0.07*sin(2*PI*329.63*t)*(0.6+0.4*cos(2*PI*0.20*t))"
+                "+0.06*sin(2*PI*392.00*t)*(0.5+0.5*sin(2*PI*0.18*t))"
+                "+0.04*sin(2*PI*493.88*t)*exp(-1.2*mod(t,2.5))"
+                "+0.06*sin(2*PI*130.81*t)"
+            )
+            af_chain = (
+                f"lowpass=f=950,aecho=0.75:0.85:75:0.28,"
+                f"afade=t=in:ss=0:d=1.5,afade=t=out:st={max(0.5, duration - 1.8):.2f}:d=1.8,volume=0.28"
+            )
+        elif bgm_type == "ancient_guofeng":
+            # 古风五声音阶 (D-E-G-A-B 空灵悠扬混响)
+            expr = (
+                "0.10*sin(2*PI*146.83*t)*(0.6+0.4*sin(2*PI*0.22*t))"
+                "+0.08*sin(2*PI*220.00*t)*(0.6+0.4*cos(2*PI*0.18*t))"
+                "+0.06*sin(2*PI*293.66*t)*exp(-1.4*mod(t,3.0))"
+                "+0.05*sin(2*PI*329.63*t)*exp(-1.8*mod(t+1.5,3.0))"
+            )
+            af_chain = (
+                f"lowpass=f=880,aecho=0.8:0.88:110:0.35,"
+                f"afade=t=in:ss=0:d=1.4,afade=t=out:st={max(0.5, duration - 1.8):.2f}:d=1.8,volume=0.30"
+            )
+        elif bgm_type == "suspense_dark":
+            # 悬疑商战/复仇 (D小调紧张弦乐 + 心跳低频脉冲)
+            expr = (
+                "0.10*sin(2*PI*146.83*t)*(0.6+0.4*sin(2*PI*0.30*t))"
+                "+0.08*sin(2*PI*174.61*t)*(0.5+0.5*cos(2*PI*0.25*t))"
+                "+0.06*sin(2*PI*220.00*t)"
+                "+0.12*sin(2*PI*58*t)*exp(-4.5*mod(t,1.2))"
+            )
+            af_chain = (
+                f"lowpass=f=560,aecho=0.8:0.86:85:0.32,"
+                f"afade=t=in:ss=0:d=1.2,afade=t=out:st={max(0.5, duration - 1.8):.2f}:d=1.8,volume=0.32"
+            )
+        elif bgm_type == "epic_battle":
             expr = (
                 "0.12*sin(2*PI*110*t)*(0.6+0.4*sin(2*PI*0.5*t))"
                 "+0.09*sin(2*PI*164.81*t)*(0.7+0.3*cos(2*PI*0.25*t))"
@@ -119,7 +206,7 @@ class AudioMixer:
             )
             af_chain = (
                 f"lowpass=f=680,aecho=0.8:0.88:60:0.35,"
-                f"afade=t=in:ss=0:d=1.2,afade=t=out:st={max(0.5, duration - 1.8):.2f}:d=1.8,volume=0.38"
+                f"afade=t=in:ss=0:d=1.2,afade=t=out:st={max(0.5, duration - 1.8):.2f}:d=1.8,volume=0.36"
             )
         else:
             expr = (

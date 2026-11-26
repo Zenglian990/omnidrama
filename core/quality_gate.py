@@ -290,10 +290,14 @@ def auto_optimize_storyboard(shots: List[Dict[str, Any]], genre: str = "都市�
             )
             fixes.append(f"镜 #{s.get('id', idx + 1)} 补全 5 维电影光影与景深提示词")
 
-        # 5. 根据台词字数动态校准单镜建议时长
+        # 5. 根据台词字数动态校准单镜建议时长（黄金首镜严格约束在 ≤3.5s，避免自相矛盾）
         char_cnt = max(1, len(dlg))
-        ideal_dur = round(max(3.2, min(7.5, char_cnt / 4.2 + 0.8)), 2)
+        if idx == 0:
+            ideal_dur = round(max(2.4, min(3.5, char_cnt / 5.0 + 0.8)), 2)
+        else:
+            ideal_dur = round(max(3.0, min(6.0, char_cnt / 4.2 + 0.8)), 2)
         s["duration"] = ideal_dur
+        s["duration_seconds"] = ideal_dur
 
     after_report = score_slideshow_risk(optimized)
     return optimized, before_report, after_report, fixes

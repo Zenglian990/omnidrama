@@ -22,13 +22,16 @@ class CapCutExporter:
     def __init__(self, fps: int = 24):
         self.fps = fps
 
+    PORTABLE_DRAFT_PLACEHOLDER = "##_draftpath_placeholder_0E685133-18CE-45ED-8CB8-2904A212EC80_##"
+
     def export_draft(
         self,
         project_title: str,
         shots: List[Dict[str, Any]],
-        output_dir: str
+        output_dir: str,
+        portable: bool = False,
     ) -> str:
-        """生成符合剪映/CapCut 标准规范的草稿工程目录（带路径遍历防护）."""
+        """生成符合剪映/CapCut 标准规范的草稿工程目录（带路径遍历防护，支持云端可移植占位符）."""
         safe_title = _safe_slug(project_title, default="AI短剧")
         draft_folder = _safe_resolve_under(output_dir, f"{safe_title}_剪映草稿工程")
         draft_folder.mkdir(parents=True, exist_ok=True)
@@ -53,8 +56,14 @@ class CapCutExporter:
             a_mat_id = str(uuid.uuid4())
             t_mat_id = str(uuid.uuid4())
 
-            v_path = str(Path(shot.get("video_path", f"./output/{safe_title}/shots/shot_{idx+1:03d}.mp4")).resolve())
-            a_path = str(Path(shot.get("audio_path", f"./output/{safe_title}/shots/shot_{idx+1:03d}.mp3")).resolve())
+            v_name = Path(shot.get("video_path", f"shot_{idx+1:03d}.mp4")).name
+            a_name = Path(shot.get("audio_path", f"shot_{idx+1:03d}.mp3")).name
+            if portable:
+                v_path = f"{self.PORTABLE_DRAFT_PLACEHOLDER}/assets/{v_name}"
+                a_path = f"{self.PORTABLE_DRAFT_PLACEHOLDER}/assets/{a_name}"
+            else:
+                v_path = str(Path(shot.get("video_path", f"./output/{safe_title}/shots/shot_{idx+1:03d}.mp4")).resolve())
+                a_path = str(Path(shot.get("audio_path", f"./output/{safe_title}/shots/shot_{idx+1:03d}.mp3")).resolve())
             dialogue_str = shot.get("dialogue", "")
 
             video_materials.append({

@@ -17,16 +17,38 @@ except ImportError:
 
 
 class VideoCompositor:
-    def __init__(self, width: int = 1080, height: int = 1920, fps: int = 24):
+    # 单镜尾部电影呼吸气口（秒），彻底消除 0 秒硬切抢话与机械念稿感
+    DEFAULT_BREATH_PAD_SEC: float = 0.24
+
+    def __init__(self, width: int = 1080, height: int = 1920, fps: int = 24, breath_pad_sec: float = DEFAULT_BREATH_PAD_SEC):
         self.width = width
         self.height = height
         self.fps = fps
+        self.breath_pad_sec = max(0.0, float(breath_pad_sec))
         self.config_path = Path(__file__).parent.parent / "config" / "camera_motions.json"
         self.motions_map = {}
         if self.config_path.exists():
             with open(self.config_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
                 self.motions_map = data.get("camera_motions", {})
+
+    def _build_cinema_transition_filters(self, audio_dur: float) -> Tuple[float, str, str]:
+        """构造单镜总时长、视频柔和首尾微淡入淡出滤镜及音频呼吸气口/防爆音滤镜."""
+        pad = self.breath_pad_sec
+        clip_dur = max(0.6, audio_dur + pad)
+        if clip_dur >= 1.0:
+            fade_d = 0.14
+            fade_out_st = max(0.2, clip_dur - fade_d)
+            v_fade = f"fade=t=in:st=0:d={fade_d:.2f},fade=t=out:st={fade_out_st:.3f}:d={fade_d:.2f}"
+        else:
+            v_fade = "null"
+        af_out_st = max(0.05, audio_dur - 0.03)
+        a_filter = (
+            f"afade=t=in:st=0:d=0.02,"
+            f"afade=t=out:st={af_out_st:.3f}:d=0.03,"
+            f"apad=pad_dur={pad:.3f}"
+        )
+        return clip_dur, v_fade, a_filter
 
     def get_audio_duration(self, audio_path: str) -> float:
         """获取精确音频时长."""
@@ -80,7 +102,8 @@ class VideoCompositor:
         """为单张分镜原画注入 2.5D 电影级运镜，并在顶层叠加固定不动的透明字幕层."""
         os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
         duration = self.get_audio_duration(audio_path)
-        total_frames = max(1, int(round(duration * self.fps)))
+        clip_duration, v_fade, a_filter = self._build_cinema_transition_filters(duration)
+        total_frames = max(1, int(round(clip_duration * self.fps)))
 
         vf_expr = self.build_video_filter(camera_motion, total_frames)
 
@@ -88,7 +111,8 @@ class VideoCompositor:
             filter_complex = (
                 f"[0:v]{vf_expr}[bg];"
                 f"[1:v]scale={self.width}:{self.height}[sub];"
-                f"[bg][sub]overlay=0:0[vout]"
+                f"[bg][sub]overlay=0:0,{v_fade}[vout];"
+                f"[2:a]{a_filter}[aout]"
             )
             cmd = [
                 "ffmpeg", "-y",
@@ -97,7 +121,7 @@ class VideoCompositor:
                 "-i", audio_path,
                 "-filter_complex", filter_complex,
                 "-map", "[vout]",
-                "-map", "2:a:0",
+                "-map", "[aout]",
                 "-c:v", "libx264",
                 "-tune", "stillimage",
                 "-pix_fmt", "yuv420p",
@@ -105,8 +129,7 @@ class VideoCompositor:
                 "-ar", "44100",
                 "-ac", "2",
                 "-b:a", "192k",
-                "-t", f"{duration:.3f}",
-                "-shortest",
+                "-t", f"{clip_duration:.3f}",
                 output_path
             ]
         else:
@@ -115,7 +138,9 @@ class VideoCompositor:
                 "-loop", "1",
                 "-i", image_path,
                 "-i", audio_path,
-                "-vf", vf_expr,
+                "-filter_complex", f"[0:v]{vf_expr},{v_fade}[vout];[1:a]{a_filter}[aout]",
+                "-map", "[vout]",
+                "-map", "[aout]",
                 "-c:v", "libx264",
                 "-tune", "stillimage",
                 "-pix_fmt", "yuv420p",
@@ -123,8 +148,7 @@ class VideoCompositor:
                 "-ar", "44100",
                 "-ac", "2",
                 "-b:a", "192k",
-                "-t", f"{duration:.3f}",
-                "-shortest",
+                "-t", f"{clip_duration:.3f}",
                 output_path
             ]
 
@@ -151,12 +175,14 @@ class VideoCompositor:
         """将神经动效视频与角色台词音频精确对齐并完成竖屏自适应，支持顶层透明字幕层。"""
         os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
         duration = self.get_audio_duration(audio_path)
+        clip_duration, v_fade, a_filter = self._build_cinema_transition_filters(duration)
         vf_expr = f"scale={self.width}:{self.height}:force_original_aspect_ratio=increase,crop={self.width}:{self.height}"
         if subtitle_overlay_path and os.path.exists(subtitle_overlay_path):
             filter_complex = (
                 f"[0:v]{vf_expr}[bg];"
                 f"[1:v]scale={self.width}:{self.height}[sub];"
-                f"[bg][sub]overlay=0:0[vout]"
+                f"[bg][sub]overlay=0:0,{v_fade}[vout];"
+                f"[2:a]{a_filter}[aout]"
             )
             cmd = [
                 "ffmpeg", "-y",
@@ -166,34 +192,36 @@ class VideoCompositor:
                 "-i", audio_path,
                 "-filter_complex", filter_complex,
                 "-map", "[vout]",
-                "-map", "2:a:0",
+                "-map", "[aout]",
                 "-c:v", "libx264",
                 "-pix_fmt", "yuv420p",
                 "-c:a", "aac",
                 "-ar", "44100",
                 "-ac", "2",
                 "-b:a", "192k",
-                "-t", f"{duration:.3f}",
-                "-shortest",
+                "-t", f"{clip_duration:.3f}",
                 output_path
             ]
         else:
+            filter_complex = (
+                f"[0:v]{vf_expr},{v_fade}[vout];"
+                f"[1:a]{a_filter}[aout]"
+            )
             cmd = [
                 "ffmpeg", "-y",
                 "-stream_loop", "-1",
                 "-i", video_path,
                 "-i", audio_path,
-                "-vf", vf_expr,
-                "-map", "0:v:0",
-                "-map", "1:a:0",
+                "-filter_complex", filter_complex,
+                "-map", "[vout]",
+                "-map", "[aout]",
                 "-c:v", "libx264",
                 "-pix_fmt", "yuv420p",
                 "-c:a", "aac",
                 "-ar", "44100",
                 "-ac", "2",
                 "-b:a", "192k",
-                "-t", f"{duration:.3f}",
-                "-shortest",
+                "-t", f"{clip_duration:.3f}",
                 output_path
             ]
         res = subprocess.run(
@@ -215,10 +243,11 @@ class VideoCompositor:
         output_path: str,
         subtitle_overlay_path: Optional[str] = None
     ) -> str:
-        """生成『真人演员活化』专属镜头：聚焦人物面部特写 + 拟真呼吸律动 + 说话声波光影脉动."""
+        """生成『真人演员活化』专属镜头：聚焦人物面部特写 + 拟真呼吸律动 + 0.24s 自然气口."""
         os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
         duration = self.get_audio_duration(audio_path)
-        total_frames = max(1, int(round(duration * self.fps)))
+        clip_duration, v_fade, a_filter = self._build_cinema_transition_filters(duration)
+        total_frames = max(1, int(round(clip_duration * self.fps)))
 
         # 面部特写构图 + 拟真胸腔呼吸起伏与微晃动 + 声波微光脉动
         live_vf = (
@@ -234,7 +263,8 @@ class VideoCompositor:
             filter_complex = (
                 f"[0:v]{live_vf}[bg];"
                 f"[1:v]scale={self.width}:{self.height}[sub];"
-                f"[bg][sub]overlay=0:0[vout]"
+                f"[bg][sub]overlay=0:0,{v_fade}[vout];"
+                f"[2:a]{a_filter}[aout]"
             )
             cmd = [
                 "ffmpeg", "-y",
@@ -243,7 +273,7 @@ class VideoCompositor:
                 "-i", audio_path,
                 "-filter_complex", filter_complex,
                 "-map", "[vout]",
-                "-map", "2:a:0",
+                "-map", "[aout]",
                 "-c:v", "libx264",
                 "-tune", "stillimage",
                 "-pix_fmt", "yuv420p",
@@ -251,16 +281,21 @@ class VideoCompositor:
                 "-ar", "44100",
                 "-ac", "2",
                 "-b:a", "192k",
-                "-t", f"{duration:.3f}",
-                "-shortest",
+                "-t", f"{clip_duration:.3f}",
                 output_path
             ]
         else:
+            filter_complex = (
+                f"[0:v]{live_vf},{v_fade}[vout];"
+                f"[1:a]{a_filter}[aout]"
+            )
             cmd = [
                 "ffmpeg", "-y",
                 "-loop", "1", "-i", image_path,
                 "-i", audio_path,
-                "-vf", live_vf,
+                "-filter_complex", filter_complex,
+                "-map", "[vout]",
+                "-map", "[aout]",
                 "-c:v", "libx264",
                 "-tune", "stillimage",
                 "-pix_fmt", "yuv420p",
@@ -268,8 +303,7 @@ class VideoCompositor:
                 "-ar", "44100",
                 "-ac", "2",
                 "-b:a", "192k",
-                "-t", f"{duration:.3f}",
-                "-shortest",
+                "-t", f"{clip_duration:.3f}",
                 output_path
             ]
 
@@ -293,9 +327,10 @@ class VideoCompositor:
         output_path: str,
         subtitle_overlay_path: Optional[str] = None
     ) -> str:
-        """将动态视频素材 (如 Pexels 实拍视频或图生视频片段) 与配音及固定透明字幕层合成为单镜 MP4."""
+        """将动态视频素材 (如 Pexels 实拍视频或图生视频片段) 与配音、呼吸气口及透明字幕层合成为单镜 MP4."""
         os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
         duration = self.get_audio_duration(audio_path)
+        clip_duration, v_fade, a_filter = self._build_cinema_transition_filters(duration)
 
         scale_crop = f"scale={self.width}:{self.height}:force_original_aspect_ratio=increase,crop={self.width}:{self.height},fps={self.fps}"
 
@@ -303,7 +338,8 @@ class VideoCompositor:
             filter_complex = (
                 f"[0:v]{scale_crop}[bg];"
                 f"[1:v]scale={self.width}:{self.height}[sub];"
-                f"[bg][sub]overlay=0:0[vout]"
+                f"[bg][sub]overlay=0:0,{v_fade}[vout];"
+                f"[2:a]{a_filter}[aout]"
             )
             cmd = [
                 "ffmpeg", "-y",
@@ -312,33 +348,35 @@ class VideoCompositor:
                 "-i", audio_path,
                 "-filter_complex", filter_complex,
                 "-map", "[vout]",
-                "-map", "2:a:0",
+                "-map", "[aout]",
                 "-c:v", "libx264",
                 "-pix_fmt", "yuv420p",
                 "-c:a", "aac",
                 "-ar", "44100",
                 "-ac", "2",
                 "-b:a", "192k",
-                "-t", f"{duration:.3f}",
-                "-shortest",
+                "-t", f"{clip_duration:.3f}",
                 output_path
             ]
         else:
+            filter_complex = (
+                f"[0:v]{scale_crop},{v_fade}[vout];"
+                f"[1:a]{a_filter}[aout]"
+            )
             cmd = [
                 "ffmpeg", "-y",
                 "-stream_loop", "-1", "-i", video_clip_path,
                 "-i", audio_path,
-                "-vf", scale_crop,
-                "-map", "0:v:0",
-                "-map", "1:a:0",
+                "-filter_complex", filter_complex,
+                "-map", "[vout]",
+                "-map", "[aout]",
                 "-c:v", "libx264",
                 "-pix_fmt", "yuv420p",
                 "-c:a", "aac",
                 "-ar", "44100",
                 "-ac", "2",
                 "-b:a", "192k",
-                "-t", f"{duration:.3f}",
-                "-shortest",
+                "-t", f"{clip_duration:.3f}",
                 output_path
             ]
 

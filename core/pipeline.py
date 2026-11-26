@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import re
 import asyncio
 from pathlib import Path
 from typing import Dict, Any, Optional, List
@@ -94,6 +95,74 @@ def _pick_source_actor_image(speaker: str, shot_id: int, assets_dir: Path) -> Pa
     return assets_dir / "actor_yileng.jpg"
 
 
+def _is_cjk_dominant(text: str) -> bool:
+    """判断文本是否以中日韩等东亚方块字为主，用于选择按字断行或英文按词断行."""
+    if not text:
+        return True
+    cjk_count = sum(1 for ch in text if "\u4e00" <= ch <= "\u9fff" or "\u3040" <= ch <= "\u30ff" or "\uac00" <= ch <= "\ud7af")
+    return cjk_count >= max(1, len(text.strip()) // 4)
+
+
+def _wrap_subtitle_lines(text: str, max_chars: int = 13, max_lines: int = 3) -> List[str]:
+    """智能字幕断行：中日韩按标点与防孤字均衡断行，英语/拉丁语按单词边界整词折行绝不劈词."""
+    clean = (text or "").strip()
+    if not clean:
+        return []
+
+    # 英语/拉丁语整词断行（每行约 26~30 字符，避免把英文单词从中间劈开）
+    if not _is_cjk_dominant(clean):
+        latin_max = max(24, int(max_chars * 2.1))
+        lines: List[str] = []
+        for para in clean.splitlines():
+            words = para.strip().split()
+            cur = ""
+            for w in words:
+                cand = f"{cur} {w}".strip() if cur else w
+                if len(cand) <= latin_max:
+                    cur = cand
+                else:
+                    if cur:
+                        lines.append(cur)
+                    cur = w
+            if cur:
+                lines.append(cur)
+        if len(lines) > max_lines:
+            tail = " ".join(lines[max_lines - 1:])
+            lines = lines[:max_lines - 1] + [tail[:latin_max - 1].rstrip() + "…"]
+        return lines
+
+    # 中日韩按标点与防末行孤字均衡断行
+    segments = [seg.strip() for seg in re.split(r"(?<=[。！？!?；;，,、])", clean) if seg.strip()]
+    lines = []
+    cur = ""
+    for seg in segments:
+        if len(cur) + len(seg) <= max_chars:
+            cur += seg
+        else:
+            if cur:
+                lines.append(cur)
+                cur = ""
+            while len(seg) > max_chars:
+                if len(seg) <= max_chars * 2:
+                    mid = (len(seg) + 1) // 2
+                    lines.append(seg[:mid])
+                    seg = seg[mid:]
+                    break
+                lines.append(seg[:max_chars])
+                seg = seg[max_chars:]
+            cur = seg
+    if cur:
+        lines.append(cur)
+    if len(lines) > max_lines:
+        merged_tail = "".join(lines[max_lines - 1:])
+        lines = lines[:max_lines - 1] + [merged_tail[:max_chars - 1] + "…"]
+    return lines
+
+
+def _contains_chinese(text: str) -> bool:
+    return any("\u4e00" <= ch <= "\u9fff" for ch in (text or ""))
+
+
 def _create_subtitle_overlay(
     shot_id: int,
     speaker: str,
@@ -101,56 +170,89 @@ def _create_subtitle_overlay(
     motion_name: str,
     out_png_path: str,
     width: int = 720,
-    height: int = 1280
+    height: int = 1280,
+    show_debug_badge: bool = False,
+    target_lang: str = "zh",
 ) -> str:
-    """生成 9:16 RGBA 全透明字幕与顶部徽标叠加层 (用于 FFmpeg 运镜后固定叠加，绝不放大裁切)."""
+    """生成 9:16 商业级纯净安全区 RGBA 透明字幕层（默认无左上角调试水印，出海模式杜绝残留中文标签）."""
     os.makedirs(os.path.dirname(os.path.abspath(out_png_path)), exist_ok=True)
     overlay = Image.new("RGBA", (width, height), (0, 0, 0, 0))
     draw = ImageDraw.Draw(overlay)
 
-    # 底部字幕渐变黑透遮罩 (营造电影下巴阴影，确保白字无论在任何背景下均极清晰)
-    gradient_height = int(height * 0.18)
+    # 底部柔和电影渐暗遮罩（轻度压暗下缘，凸显字幕且不破坏主体画面）
+    gradient_height = int(height * 0.30)
     gradient_top = height - gradient_height
     for y in range(gradient_top, height):
         ratio = (y - gradient_top) / max(1, gradient_height)
-        alpha = int(220 * ratio)
-        draw.line([(0, y), (width, y)], fill=(8, 10, 18, alpha))
+        alpha = int(165 * (ratio ** 1.35))
+        draw.line([(0, y), (width, y)], fill=(6, 8, 16, alpha))
 
-    # 字体尺寸按分辨率自适应
-    badge_size = max(16, int(height * 0.016))
-    speaker_size = max(20, int(height * 0.021))
-    dialogue_size = max(24, int(height * 0.024))
+    lang = (target_lang or "zh").strip().lower()
+    is_latin = (lang == "en") or (dialogue and not _is_cjk_dominant(dialogue))
+
+    badge_size = max(18, int(height * 0.017))
+    speaker_size = max(22, int(height * 0.022))
+    dialogue_size = max(30, int(height * (0.028 if is_latin else 0.033)))
 
     badge_font = _load_cjk_font(badge_size)
     speaker_font = _load_cjk_font(speaker_size)
     dialogue_font = _load_cjk_font(dialogue_size)
 
-    # 顶部镜头徽标 (固定在左上角安全区)
-    badge_text = f"第 {shot_id:02d} 镜 · {motion_name}"
-    badge_w = int(width * 0.38)
-    badge_h = int(height * 0.038)
-    draw.rounded_rectangle([20, 24, 20 + badge_w, 24 + badge_h], radius=8, fill=(10, 14, 26, 210), outline=(0, 200, 255, 180), width=1)
-    draw.text((32, 28), badge_text, font=badge_font, fill=(0, 220, 255, 255))
+    # 商业成片默认彻底关闭左上角调试编号水印，仅在显式开启 show_debug_badge 时绘制
+    if show_debug_badge:
+        badge_text = f"#{shot_id:02d} · {motion_name}"
+        b_box = draw.textbbox((0, 0), badge_text, font=badge_font)
+        badge_w = (b_box[2] - b_box[0]) + 28
+        badge_h = (b_box[3] - b_box[1]) + 16
+        draw.rounded_rectangle([24, 34, 24 + badge_w, 34 + badge_h], radius=10, fill=(10, 14, 26, 185), outline=(0, 220, 255, 160), width=1)
+        draw.text((38, 41), badge_text, font=badge_font, fill=(0, 232, 255, 255))
 
-    # 底部角色名标签
-    if speaker and speaker not in ["Scene", "环境"]:
-        speaker_color = (255, 215, 0, 255) if any(k in speaker for k in ["易冷", "叶辰", "主角", "男主"]) else (
-            (255, 110, 110, 255) if any(k in speaker for k in ["恶霸", "反派", "刀疤", "打手", "赵天龙"]) else (
-                (255, 180, 210, 255) if any(k in speaker for k in ["暖暖", "女儿", "女孩"]) else (120, 220, 255, 255)
-            )
-        )
-        draw.text((36, height - int(height * 0.150)), f"【{speaker}】", font=speaker_font, fill=speaker_color)
+    # 字幕垂直安全区：距离底部 18% ~ 31%，避开 TikTok / 抖音底部文案及播放器进度条
+    lines = _wrap_subtitle_lines(dialogue, max_chars=13 if width <= 720 else 16, max_lines=3)
+    line_spacing = int(dialogue_size * 1.38)
+    total_text_h = len(lines) * line_spacing if lines else 0
+    sub_bottom_y = height - int(height * 0.175)
+    sub_top_y = sub_bottom_y - total_text_h
 
-    # 底部描边中文字幕
-    if dialogue:
-        max_chars_per_line = 18 if width <= 720 else 22
-        dialogue_lines = [dialogue[i:i + max_chars_per_line] for i in range(0, len(dialogue), max_chars_per_line)][:3]
-        line_y = height - int(height * 0.110)
-        line_spacing = int(dialogue_size * 1.35)
-        for line in dialogue_lines:
-            for ox, oy in [(-2, 0), (2, 0), (0, -2), (0, 2), (-1, -1), (1, 1), (-1, 1), (1, -1)]:
-                draw.text((36 + ox, line_y + oy), line, font=dialogue_font, fill=(0, 0, 0, 255))
-            draw.text((36, line_y), line, font=dialogue_font, fill=(255, 255, 255, 255))
+    # 角色名胶囊：旁白/环境镜头直接隐去胶囊提升电影沉浸感；非中文出海成片严禁渲染未翻译的中文角色名
+    clean_speaker = (speaker or "").strip()
+    is_narrator = (not clean_speaker) or any(k in clean_speaker for k in ["旁白", "叙事", "Scene", "环境", "Narrator"])
+    hide_due_to_lang = (lang != "zh" and _contains_chinese(clean_speaker))
+    if clean_speaker and not is_narrator and not hide_due_to_lang:
+        if any(k in clean_speaker for k in ["恶霸", "反派", "刀疤", "打手", "混混", "赵", "母", "Villain"]):
+            pill_bg, pill_fg = (153, 27, 27, 220), (254, 226, 226, 255)
+        elif any(k in clean_speaker for k in ["暖暖", "女儿", "女孩", "女", "林", "苏", "妻", "Lady", "Miss"]):
+            pill_bg, pill_fg = (131, 24, 67, 220), (252, 231, 243, 255)
+        else:
+            pill_bg, pill_fg = (120, 53, 15, 225), (254, 240, 138, 255)
+        s_box = draw.textbbox((0, 0), clean_speaker, font=speaker_font)
+        sp_w = (s_box[2] - s_box[0]) + 32
+        sp_h = (s_box[3] - s_box[1]) + 14
+        sp_x1 = (width - sp_w) // 2
+        sp_y2 = sub_top_y - 16 if lines else (sub_bottom_y - 20)
+        sp_y1 = sp_y2 - sp_h
+        draw.rounded_rectangle([sp_x1, sp_y1, sp_x1 + sp_w, sp_y2], radius=sp_h // 2, fill=pill_bg, outline=(255, 255, 255, 90), width=1)
+        draw.text((width // 2, (sp_y1 + sp_y2) // 2), clean_speaker, font=speaker_font, fill=pill_fg, anchor="mm")
+
+    # 居中粗描边大字幕 + 柔和半透明圆角底托
+    if lines:
+        max_line_w = 0
+        for ln in lines:
+            l_box = draw.textbbox((0, 0), ln, font=dialogue_font)
+            max_line_w = max(max_line_w, l_box[2] - l_box[0])
+        pad_x, pad_y = 26, 14
+        box_x1 = max(24, (width - max_line_w) // 2 - pad_x)
+        box_x2 = min(width - 24, (width + max_line_w) // 2 + pad_x)
+        box_y1 = sub_top_y - pad_y
+        box_y2 = sub_bottom_y + pad_y - 6
+        draw.rounded_rectangle([box_x1, box_y1, box_x2, box_y2], radius=16, fill=(8, 12, 22, 165))
+
+        line_y = sub_top_y + line_spacing // 2
+        stroke_offsets = [(-3, 0), (3, 0), (0, -3), (0, 3), (-2, -2), (2, 2), (-2, 2), (2, -2)]
+        for line in lines:
+            for ox, oy in stroke_offsets:
+                draw.text((width // 2 + ox, line_y + oy), line, font=dialogue_font, fill=(0, 0, 0, 255), anchor="mm")
+            draw.text((width // 2, line_y), line, font=dialogue_font, fill=(255, 255, 255, 255), anchor="mm")
             line_y += line_spacing
 
     overlay.save(out_png_path, "PNG")
@@ -359,6 +461,8 @@ class OmniDramaPipeline:
                 except Exception as e:
                     print(f"[Pipeline] Kling 视频生成异常: {e}")
 
+            clip_path = os.path.join(shots_dir, f"shot_{shot.shot_id:03d}.mp4")
+
             if sota_video_path and os.path.exists(sota_video_path):
                 self.compositor.render_video_shot(
                     video_clip_path=sota_video_path,
@@ -370,7 +474,6 @@ class OmniDramaPipeline:
                 continue
 
             # 5. 单镜头渲染 (支持 LivePortrait 神经动效与 2.5D 运镜自动融合)
-            clip_path = os.path.join(shots_dir, f"shot_{shot.shot_id:03d}.mp4")
             neural_rendered = False
 
             # 若启用神经动效，且为非旁白角色特写/对话镜头

@@ -1,6 +1,7 @@
 """OmniDrama 全站鉴权、路径遍历防护与 FFmpeg concat 安全构造模块."""
 from __future__ import annotations
 
+import hashlib
 import hmac
 import os
 import posixpath
@@ -60,27 +61,78 @@ def is_public_request(method: str, raw_path: str) -> bool:
     return any(norm_path.startswith(prefix) for prefix in PUBLIC_PREFIXES)
 
 
-def verify_bearer_token(auth_header: Optional[str]) -> bool:
-    """使用恒定时间比对验证 Authorization: Bearer <token>.
+SESSION_COOKIE_NAME = "omnidrama_session"
+_SESSION_HMAC_CONTEXT = b"omnidrama-http-session-v1"
 
-    - 若已配置 `API_AUTH_TOKEN` 环境变量，则强制校验 Bearer Token。
-    - 若未配置 `API_AUTH_TOKEN`，保持与 Web 前端工作台同源访问及本地测试套件平滑兼容，
-      但若请求显式携带了伪造/格式非法的 Authorization 头则予以拒绝。
+
+def is_production_runtime() -> bool:
+    """判断当前是否运行在云端生产环境（如 Cloud Run）或显式严格鉴权模式."""
+    if os.environ.get("K_SERVICE", "").strip():
+        return True
+    if os.environ.get("OMNIDRAMA_ENV", "").strip().lower() in ("prod", "production"):
+        return True
+    if os.environ.get("OMNIDRAMA_STRICT_AUTH", "").strip().lower() in ("1", "true", "yes"):
+        return True
+    return False
+
+
+def get_auth_mode() -> str:
+    """返回当前站点的鉴权模式标识，便于健康检查与运维诊断."""
+    expected = os.environ.get("API_AUTH_TOKEN", "").strip()
+    if expected:
+        return "token_protected"
+    if is_production_runtime():
+        if os.environ.get("OMNIDRAMA_ALLOW_ANONYMOUS", "").strip().lower() in ("1", "true", "yes"):
+            return "production_anonymous_override"
+        return "fail_closed_missing_token"
+    return "local_dev_open"
+
+
+def build_session_cookie_value(token: Optional[str] = None) -> str:
+    """使用 HMAC-SHA256 生成不可逆的浏览器会话 Cookie 值（绝不明文存放 API_AUTH_TOKEN）."""
+    secret = (token if token is not None else os.environ.get("API_AUTH_TOKEN", "")).strip()
+    if not secret:
+        return ""
+    return hmac.new(secret.encode("utf-8"), _SESSION_HMAC_CONTEXT, hashlib.sha256).hexdigest()
+
+
+def verify_session_cookie(cookie_value: Optional[str]) -> bool:
+    """恒定时间验证浏览器 HttpOnly 会话 Cookie."""
+    expected = os.environ.get("API_AUTH_TOKEN", "").strip()
+    if not expected or not cookie_value or not isinstance(cookie_value, str):
+        return False
+    expected_mac = build_session_cookie_value(expected)
+    return hmac.compare_digest(cookie_value.strip().encode("utf-8"), expected_mac.encode("utf-8"))
+
+
+def verify_bearer_token(auth_header: Optional[str], session_cookie: Optional[str] = None) -> bool:
+    """使用恒定时间比对验证 Authorization: Bearer <token> 或同源 HttpOnly 会话 Cookie.
+
+    - 若已配置 `API_AUTH_TOKEN` 环境变量，则强制校验 Bearer Token 或有效会话 Cookie。
+    - 若未配置 `API_AUTH_TOKEN`：
+      - 生产环境（Cloud Run `K_SERVICE` / `OMNIDRAMA_ENV=production` / `OMNIDRAMA_STRICT_AUTH=1`）
+        默认真 Fail-Closed 直接拒绝，除非显式设置 `OMNIDRAMA_ALLOW_ANONYMOUS=true`。
+      - 本地开发/测试环境平滑兼容，但若请求显式携带了伪造/格式非法的 Authorization 头仍予以拒绝。
     """
     expected = os.environ.get("API_AUTH_TOKEN", "").strip()
     if not expected:
+        if is_production_runtime():
+            allow_anon = os.environ.get("OMNIDRAMA_ALLOW_ANONYMOUS", "").strip().lower() in ("1", "true", "yes")
+            if not allow_anon:
+                return False
         if auth_header and isinstance(auth_header, str) and auth_header.strip():
             return False
         return True
-    if not auth_header or not isinstance(auth_header, str):
+    if auth_header and isinstance(auth_header, str):
+        parts = auth_header.split(" ", 1)
+        if len(parts) == 2 and parts[0].lower() == "bearer":
+            provided = parts[1].strip()
+            if provided and hmac.compare_digest(provided.encode("utf-8"), expected.encode("utf-8")):
+                return True
         return False
-    parts = auth_header.split(" ", 1)
-    if len(parts) != 2 or parts[0].lower() != "bearer":
-        return False
-    provided = parts[1].strip()
-    if not provided:
-        return False
-    return hmac.compare_digest(provided.encode("utf-8"), expected.encode("utf-8"))
+    if session_cookie and verify_session_cookie(session_cookie):
+        return True
+    return False
 
 
 def has_path_traversal_markers(raw: Optional[str]) -> bool:

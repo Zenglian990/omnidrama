@@ -4,28 +4,10 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>OmniDrama 灵眸漫剧 - 工业级 AI 漫剧导演工作台</title>
-  <!-- Tailwind CSS & FontAwesome -->
-  <script src="https://cdn.tailwindcss.com"></script>
-  <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-  <script>
-    tailwind.config = {
-      darkMode: 'class',
-      theme: {
-        extend: {
-          colors: {
-            brand: {
-              cyan: '#00F2FE',
-              purple: '#7928CA',
-              dark: '#0B0E14',
-              card: '#141824',
-              border: '#232938'
-            }
-          }
-        }
-      }
-    }
-  </script>
+  <!-- 100% 本地化静态资源（预编译 Tailwind CSS + Vue 3 生产版 + FontAwesome 离线图标），彻底告别慢速海外 CDN -->
+  <link rel="stylesheet" href="/static/vendor/app.css">
+  <link rel="stylesheet" href="/static/vendor/fontawesome/css/all.min.css">
+  <script src="/static/vendor/vue.global.prod.js"></script>
   <style>
     body {
       background-color: #080A0F;
@@ -52,97 +34,97 @@
   </style>
 </head>
 <body class="h-screen flex flex-col overflow-hidden">
-  <div id="app" class="flex flex-col h-full">
+  <div id="app" class="flex flex-col h-full overflow-hidden">
 
-    <!-- 顶部导航栏 -->
-    <header class="h-14 border-b border-brand-border bg-brand-dark px-6 flex items-center justify-between flex-shrink-0">
-      <div class="flex items-center space-x-3">
-        <div class="w-8 h-8 rounded-lg bg-gradient-to-tr from-brand-cyan to-brand-purple flex items-center justify-center font-black text-black text-lg">
+    <!-- 顶部导航栏（桌面端单行防折行 + 移动端自适应换行不溢出） -->
+    <header class="min-h-14 border-b border-brand-border bg-brand-dark px-3 lg:px-5 py-2 flex flex-wrap items-center justify-between gap-2 flex-shrink-0">
+      <div class="flex items-center space-x-2.5 flex-shrink-0">
+        <div class="w-8 h-8 rounded-lg bg-gradient-to-tr from-brand-cyan to-brand-purple flex items-center justify-center font-black text-black text-lg flex-shrink-0">
           Ω
         </div>
-        <div>
-          <span class="font-bold text-lg tracking-wider bg-gradient-to-r from-brand-cyan to-purple-400 bg-clip-text text-transparent">
+        <div class="flex items-center whitespace-nowrap">
+          <span class="font-bold text-base lg:text-lg tracking-wider bg-gradient-to-r from-brand-cyan to-purple-400 bg-clip-text text-transparent">
             OmniDrama
           </span>
-          <span class="text-xs text-gray-400 ml-2 px-2 py-0.5 rounded bg-brand-border">灵眸漫剧工作台 v2.0</span>
+          <span class="hidden sm:inline text-[11px] text-gray-400 ml-2 px-2 py-0.5 rounded bg-brand-border">灵眸漫剧 v2.1</span>
         </div>
       </div>
 
       <!-- 中间项目与连载剧集状态 -->
-      <div class="flex items-center space-x-4 text-sm">
-        <div class="flex items-center space-x-2">
-          <span class="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse"></span>
-          <span class="text-gray-300">{{ t('current_series') }}:</span>
-          <span class="font-semibold text-brand-cyan">《{{ activeSeries.title || project.title }}》</span>
+      <div class="flex items-center flex-wrap gap-2 text-xs lg:text-sm min-w-0">
+        <div class="flex items-center space-x-1.5 min-w-0">
+          <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse flex-shrink-0"></span>
+          <span class="hidden xl:inline text-gray-400 whitespace-nowrap">{{ t('current_series') }}:</span>
+          <span class="font-semibold text-brand-cyan truncate max-w-[160px] lg:max-w-[220px]">《{{ project.title || activeSeries.title || '新建短剧' }}》</span>
         </div>
 
-        <!-- 连载分集下拉快捷入口 -->
+        <!-- 连载分集下拉快捷入口（仅当与当前剧目匹配时展示分集名，杜绝跨剧串台） -->
         <button 
           @click="showEpisodeModal = true"
-          class="px-2.5 py-1 rounded-lg bg-brand-card hover:bg-brand-border border border-brand-border text-xs text-amber-300 flex items-center space-x-1.5 transition shadow"
+          class="px-2 py-1 rounded-lg bg-brand-card hover:bg-brand-border border border-brand-border text-xs text-amber-300 flex items-center space-x-1 transition shadow whitespace-nowrap"
         >
           <i class="fa-solid fa-list-ol text-amber-400"></i>
-          <span>{{ currentEpisode.title || '第 1 集' }}</span>
-          <i class="fa-solid fa-chevron-down text-[10px] text-gray-400 ml-1"></i>
+          <span class="truncate max-w-[130px]">{{ (project.episode_id && currentEpisode.id === project.episode_id && currentEpisode.title) ? currentEpisode.title : '分集管理' }}</span>
+          <i class="fa-solid fa-chevron-down text-[10px] text-gray-400"></i>
         </button>
 
-        <div class="text-xs text-gray-400">
-          <i class="fa-solid fa-film text-purple-400 mr-1"></i> {{ project.shots.length }} {{ t('shots') }}
+        <div class="text-xs text-gray-400 whitespace-nowrap">
+          <i class="fa-solid fa-film text-purple-400 mr-1"></i>{{ project.shots.length }} {{ t('shots') }}
         </div>
-        <div class="text-xs text-gray-400">
-          <i class="fa-solid fa-clock text-amber-400 mr-1"></i> {{ project.duration }}s
+        <div class="text-xs text-gray-400 whitespace-nowrap">
+          <i class="fa-solid fa-clock text-amber-400 mr-1"></i>{{ Number(project.duration || 0).toFixed(1) }}s
         </div>
       </div>
 
-      <!-- 右侧操作与语言切换 -->
-      <div class="flex items-center space-x-2.5">
+      <!-- 右侧操作与语言切换（可横向滚动兜底，杜绝撑爆窄屏） -->
+      <div class="flex items-center gap-1.5 lg:gap-2 overflow-x-auto max-w-full pb-0.5 lg:pb-0">
         <!-- 国际化语言切换器 (i18n) -->
         <select 
           v-model="currentLang" 
-          class="bg-brand-card text-xs text-gray-200 border border-brand-border rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-brand-cyan transition"
+          class="bg-brand-card text-xs text-gray-200 border border-brand-border rounded-lg px-2 py-1.5 focus:outline-none focus:border-brand-cyan transition flex-shrink-0"
         >
-          <option value="zh">🇨🇳 简体中文</option>
-          <option value="en">🇺🇸 English</option>
+          <option value="zh">🇨🇳 中文</option>
+          <option value="en">🇺🇸 EN</option>
           <option value="ja">🇯🇵 日本語</option>
           <option value="ko">🇰🇷 한국어</option>
         </select>
 
         <button 
           @click="openScriptModal" 
-          class="px-3 py-1.5 rounded-lg bg-gradient-to-r from-orange-600/80 to-red-600/80 hover:from-orange-500 hover:to-red-500 text-white text-xs font-bold transition flex items-center space-x-1.5 shadow"
+          class="px-2.5 py-1.5 rounded-lg bg-gradient-to-r from-orange-600/90 to-red-600/90 hover:from-orange-500 hover:to-red-500 text-white text-xs font-bold transition flex items-center space-x-1 shadow whitespace-nowrap flex-shrink-0"
         >
           <i class="fa-solid fa-fire-flame-curved"></i>
-          <span>AI 灵感编剧 / 番茄热榜</span>
+          <span>AI 编剧/热榜</span>
         </button>
 
         <button 
           @click="triggerRenderPipeline" 
-          :disabled="renderState.is_rendering"
-          class="px-3 py-1.5 rounded-lg bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-black font-bold text-xs transition flex items-center space-x-1.5 shadow disabled:opacity-50"
+          :disabled="renderState.is_rendering || project.shots.length === 0"
+          class="px-2.5 py-1.5 rounded-lg bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-black font-bold text-xs transition flex items-center space-x-1 shadow disabled:opacity-50 whitespace-nowrap flex-shrink-0"
         >
           <i class="fa-solid fa-rocket"></i>
-          <span>{{ renderState.is_rendering ? `合成中 (${renderState.progress}%)` : '🚀 5阶段合成成片' }}</span>
+          <span>{{ renderState.is_rendering ? `合成中 (${renderState.progress}%)` : '合成成片' }}</span>
         </button>
 
         <button 
           @click="showRefModal = true" 
-          class="px-3 py-1.5 rounded-lg bg-gradient-to-r from-rose-900/70 to-orange-900/70 hover:from-rose-800 hover:to-orange-800 border border-rose-500/40 text-rose-200 text-xs font-semibold transition flex items-center space-x-1.5 shadow"
+          class="px-2.5 py-1.5 rounded-lg bg-gradient-to-r from-rose-900/70 to-orange-900/70 hover:from-rose-800 hover:to-orange-800 border border-rose-500/40 text-rose-200 text-xs font-semibold transition flex items-center space-x-1 shadow whitespace-nowrap flex-shrink-0"
         >
           <i class="fa-solid fa-wand-magic-sparkles text-rose-400"></i>
-          <span>🎯 爆款视频拆解仿写</span>
+          <span>爆款仿写</span>
         </button>
 
         <button 
           @click="openQualityModal" 
-          class="px-3 py-1.5 rounded-lg bg-gradient-to-r from-indigo-900/70 to-cyan-900/70 hover:from-indigo-800 hover:to-cyan-800 border border-cyan-500/40 text-cyan-200 text-xs font-semibold transition flex items-center space-x-1.5 shadow"
+          class="px-2.5 py-1.5 rounded-lg bg-gradient-to-r from-indigo-900/70 to-cyan-900/70 hover:from-indigo-800 hover:to-cyan-800 border border-cyan-500/40 text-cyan-200 text-xs font-semibold transition flex items-center space-x-1 shadow whitespace-nowrap flex-shrink-0"
         >
           <i class="fa-solid fa-shield-halved text-cyan-400"></i>
-          <span>🛡️ 导演质检与账单</span>
+          <span>质检账单</span>
         </button>
 
         <button 
           @click="showSotaModal = true" 
-          class="px-3 py-1.5 rounded-lg bg-gradient-to-r from-purple-900/60 to-pink-900/60 hover:from-purple-800 hover:to-pink-800 border border-purple-500/40 text-purple-200 text-xs font-semibold transition flex items-center space-x-1.5 shadow"
+          class="px-2.5 py-1.5 rounded-lg bg-gradient-to-r from-purple-900/60 to-pink-900/60 hover:from-purple-800 hover:to-pink-800 border border-purple-500/40 text-purple-200 text-xs font-semibold transition flex items-center space-x-1 shadow whitespace-nowrap flex-shrink-0"
         >
           <i class="fa-solid fa-microchip text-pink-400"></i>
           <span>{{ t('sota_engine') }}</span>
@@ -150,25 +132,25 @@
 
         <button 
           @click="exportToJianying" 
-          :disabled="isExporting"
-          class="px-3.5 py-1.5 rounded-lg bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-black font-bold text-xs transition flex items-center space-x-1.5 shadow-lg shadow-orange-500/20 disabled:opacity-50"
+          :disabled="isExporting || project.shots.length === 0"
+          class="px-2.5 py-1.5 rounded-lg bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-black font-bold text-xs transition flex items-center space-x-1 shadow disabled:opacity-50 whitespace-nowrap flex-shrink-0"
         >
           <i class="fa-solid fa-scissors"></i>
           <span>{{ isExporting ? t('exporting') : t('export_capcut') }}</span>
         </button>
 
-        <a v-if="project.video_url" :href="`/api/video/download?mode=${activeVideoMode}`" download class="px-3.5 py-1.5 rounded-lg bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-black font-semibold text-xs transition flex items-center space-x-1.5 shadow-lg shadow-cyan-500/20">
+        <a v-if="project.video_url" :href="`/api/video/download?mode=${activeVideoMode}`" download class="px-2.5 py-1.5 rounded-lg bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-black font-semibold text-xs transition flex items-center space-x-1 shadow whitespace-nowrap flex-shrink-0">
           <i class="fa-solid fa-download"></i>
           <span>{{ t('download_film') }}</span>
         </a>
       </div>
     </header>
 
-    <!-- 主工作区：三栏布局 -->
-    <main class="flex-1 flex overflow-hidden">
+    <!-- 主工作区：桌面端三栏布局，移动端按 mobileTab 单栏切换不遮挡 -->
+    <main class="flex-1 flex flex-col lg:flex-row overflow-hidden min-h-0">
 
-      <!-- 左栏：角色资产库与声音控制台 (280px) -->
-      <aside class="w-72 border-r border-brand-border bg-brand-dark p-4 flex flex-col space-y-4 overflow-y-auto flex-shrink-0">
+      <!-- 左栏：角色资产库与声音控制台 -->
+      <aside :class="mobileTab === 'cast' ? 'flex' : 'hidden lg:flex'" class="w-full lg:w-64 xl:w-72 border-r border-brand-border bg-brand-dark p-3.5 lg:p-4 flex-col space-y-4 overflow-y-auto flex-shrink-0 min-h-0">
         
         <!-- 角色定妆资产库 -->
         <div>
@@ -178,10 +160,16 @@
               <i class="fa-solid fa-plus text-[9px]"></i><span>定妆定音</span>
             </button>
           </h2>
+          <div v-if="project.characters.length === 0" class="p-4 rounded-lg bg-brand-card/60 border border-dashed border-brand-border text-center text-xs text-gray-500">
+            暂无角色资产，点击上方「AI 编剧/热榜」拆解剧本或手动新增角色
+          </div>
           <div class="space-y-2.5">
             <div v-for="char in project.characters" :key="char.name" @click="openCharacterEdit(char)" class="p-2.5 rounded-lg bg-brand-card border border-brand-border hover:border-brand-cyan/60 transition cursor-pointer group">
               <div class="flex items-center space-x-2.5">
-                <img :src="char.avatar" class="w-11 h-11 rounded-lg object-cover border border-gray-700 group-hover:border-brand-cyan transition">
+                <img v-if="char.avatar" :src="char.avatar" @error="char.avatar = ''" class="w-11 h-11 rounded-lg object-cover border border-gray-700 group-hover:border-brand-cyan transition flex-shrink-0">
+                <div v-else class="w-11 h-11 rounded-lg bg-gradient-to-br from-cyan-600/40 to-purple-600/40 border border-gray-700 group-hover:border-brand-cyan flex items-center justify-center text-sm font-bold text-brand-cyan flex-shrink-0">
+                  {{ (char.name || '角').slice(0, 1) }}
+                </div>
                 <div class="flex-1 min-w-0">
                   <div class="font-bold text-sm text-gray-100 flex items-center justify-between">
                     <span class="truncate">{{ char.name }}</span>
@@ -193,8 +181,8 @@
                     </div>
                   </div>
                   <div class="text-[11px] text-brand-cyan truncate mt-0.5 flex items-center justify-between">
-                    <span><i class="fa-solid fa-microphone text-[10px] mr-1"></i>{{ char.voice }}</span>
-                    <span class="text-[10px] text-gray-500 group-hover:text-brand-cyan">⚙️ 定妆</span>
+                    <span class="truncate"><i class="fa-solid fa-microphone text-[10px] mr-1"></i>{{ char.voice }}</span>
+                    <span class="text-[10px] text-gray-500 group-hover:text-brand-cyan flex-shrink-0 ml-1">⚙️ 定妆</span>
                   </div>
                   <!-- 物理一致性锁定徽标 -->
                   <div class="flex items-center space-x-1 mt-1 flex-wrap gap-y-1">
@@ -223,6 +211,9 @@
             <span><i class="fa-solid fa-sliders text-purple-400 mr-1.5"></i> 三轨合一电影混音</span>
             <span class="w-2 h-2 rounded-full bg-emerald-400"></span>
           </h2>
+          <div v-if="project.audio_tracks.length === 0" class="text-[11px] text-gray-500 p-2 rounded bg-brand-card/50 border border-brand-border">
+            拆解剧本后将自动配置人声、音效与配乐三轨
+          </div>
           <div class="space-y-2">
             <div v-for="t in project.audio_tracks" :key="t.track" class="p-2 rounded bg-brand-card border border-brand-border text-xs flex flex-col space-y-1">
               <div class="flex items-center justify-between">
@@ -237,82 +228,138 @@
         <!-- 系统提示 -->
         <div class="mt-auto p-3 rounded-lg bg-cyan-950/20 border border-cyan-800/30 text-[11px] text-gray-400">
           <i class="fa-solid fa-circle-check text-brand-cyan mr-1"></i>
-          <span>角色固定 Seed 已开启，全片 {{ project.shots.length }} 个分镜音画对齐。</span>
+          <span>角色固定 Seed 已开启，当前工程共 {{ project.shots.length }} 个分镜。</span>
         </div>
       </aside>
 
       <!-- 中栏：分镜画布与镜头清单 (自适应) -->
-      <section class="flex-1 flex flex-col bg-[#07090E] overflow-hidden">
+      <section :class="mobileTab === 'storyboard' ? 'flex' : 'hidden lg:flex'" class="flex-1 flex-col bg-[#07090E] overflow-hidden min-w-0 min-h-0">
         
-        <!-- 分镜栏头部 -->
-        <div class="h-11 px-6 border-b border-brand-border bg-brand-dark/50 flex items-center justify-between flex-shrink-0">
+        <!-- 分镜栏头部（含加一镜、一键出海多语言译制、新建清空） -->
+        <div class="min-h-11 px-4 lg:px-5 py-2 border-b border-brand-border bg-brand-dark/50 flex flex-wrap items-center justify-between gap-2 flex-shrink-0">
           <div class="text-xs font-bold text-gray-300 flex items-center space-x-2">
-            <span><i class="fa-solid fa-clapperboard text-brand-cyan mr-1.5"></i> 全部分镜列表 (Storyboard Flow)</span>
-            <span class="text-gray-500 font-normal">点击任意分镜可试听配音或精修台词与重绘画面</span>
+            <span><i class="fa-solid fa-clapperboard text-brand-cyan mr-1.5"></i> 全部分镜列表 ({{ project.shots.length }} 镜)</span>
+            <span v-if="project.language && project.language !== 'zh'" class="px-1.5 py-0.5 rounded bg-cyan-950 text-brand-cyan border border-cyan-700/60 text-[10px]">
+              🌍 {{ project.language.toUpperCase() }} 出海版
+            </span>
           </div>
-          <div class="text-[11px] text-gray-400 flex items-center space-x-3">
-            <span><span class="w-2 h-2 rounded-full bg-cyan-400 inline-block mr-1"></span>推镜头 (Zoom-In)</span>
-            <span><span class="w-2 h-2 rounded-full bg-purple-400 inline-block mr-1"></span>横移 (Pan)</span>
-            <span><span class="w-2 h-2 rounded-full bg-amber-400 inline-block mr-1"></span>震动 (Shake)</span>
+          <div class="flex flex-wrap items-center gap-1.5 text-[11px]">
+            <button @click="addNewShot" class="px-2.5 py-1 rounded-lg bg-cyan-950/70 hover:bg-cyan-900 border border-cyan-700/60 text-brand-cyan font-semibold transition flex items-center space-x-1">
+              <i class="fa-solid fa-plus text-[10px]"></i>
+              <span>加一镜</span>
+            </button>
+            <div class="flex items-center bg-brand-card border border-indigo-500/40 rounded-lg overflow-hidden">
+              <select v-model="localizeTargetLang" class="bg-transparent text-indigo-200 px-2 py-1 text-[11px] focus:outline-none">
+                <option value="en" class="bg-brand-dark">🇺🇸 英语出海</option>
+                <option value="ja" class="bg-brand-dark">🇯🇵 日语出海</option>
+                <option value="ko" class="bg-brand-dark">🇰🇷 韩语出海</option>
+                <option value="zh" class="bg-brand-dark">🇨🇳 还原中文</option>
+              </select>
+              <button @click="localizeProject" :disabled="isLocalizing || project.shots.length === 0" class="px-2.5 py-1 bg-indigo-600/80 hover:bg-indigo-500 text-white font-semibold disabled:opacity-50 transition">
+                {{ isLocalizing ? '译制中...' : '🌍 一键出海译制' }}
+              </button>
+            </div>
+            <button v-if="project.shots.length > 0" @click="resetWorkspaceProject" class="px-2 py-1 rounded-lg bg-brand-card hover:bg-rose-950/60 border border-brand-border hover:border-rose-600/50 text-gray-400 hover:text-rose-300 transition" title="清空当前工作台新建短剧">
+              <i class="fa-solid fa-broom"></i>
+            </button>
           </div>
         </div>
 
         <!-- 分镜卡片滚动区 -->
-        <div class="flex-1 p-6 overflow-y-auto space-y-3.5">
+        <div class="flex-1 p-4 lg:p-6 overflow-y-auto space-y-3.5">
+          <!-- 空工程新手引导卡 -->
+          <div v-if="project.shots.length === 0" class="h-full flex flex-col items-center justify-center text-center p-6 rounded-2xl border border-dashed border-brand-border bg-brand-card/30">
+            <div class="w-14 h-14 rounded-2xl bg-gradient-to-tr from-brand-cyan/20 to-brand-purple/20 border border-brand-cyan/40 flex items-center justify-center text-2xl text-brand-cyan mb-4">
+              <i class="fa-solid fa-film"></i>
+            </div>
+            <h3 class="text-base font-bold text-gray-100 mb-2">当前工作台为空，3 步开启一部 AI 短剧</h3>
+            <p class="text-xs text-gray-400 max-w-md mb-5 leading-relaxed">
+              ① 点击下方按钮输入原创故事或从番茄热榜选书 → ② AI 导演自动拆解多镜分镜与角色 → ③ 点击「合成成片」自动生图配音并压制竖屏 MP4 与剪映草稿包
+            </p>
+            <button @click="openScriptModal" class="px-5 py-2.5 rounded-xl bg-gradient-to-r from-orange-500 to-red-600 hover:from-orange-400 hover:to-red-500 text-white font-bold text-xs shadow-lg transition flex items-center space-x-2">
+              <i class="fa-solid fa-fire-flame-curved"></i>
+              <span>立即创作剧本 / 抓取番茄热榜</span>
+            </button>
+          </div>
+
           <div 
             v-for="shot in project.shots" 
             :key="shot.id"
             @click="selectedShot = shot"
             :class="{'border-brand-cyan ring-1 ring-brand-cyan/40': selectedShot.id === shot.id}"
-            class="p-4 rounded-xl bg-brand-card border border-brand-border hover:border-gray-600 transition flex space-x-4 cursor-pointer"
+            class="p-3.5 lg:p-4 rounded-xl bg-brand-card border border-brand-border hover:border-gray-600 transition flex flex-col sm:flex-row gap-3.5 cursor-pointer"
           >
-            <!-- 缩略图 -->
-            <div class="w-24 h-40 rounded-lg overflow-hidden bg-black flex-shrink-0 relative border border-gray-800">
-              <img :src="`${shot.image}?t=${cacheBust}`" class="w-full h-full object-cover">
+            <!-- 缩略图（无图时显示待绘占位，绝不触发 404 破图） -->
+            <div class="w-full sm:w-24 h-44 sm:h-40 rounded-lg overflow-hidden bg-brand-dark flex-shrink-0 relative border border-gray-800 flex items-center justify-center">
+              <img v-if="shot.image" :src="`${shot.image}?t=${cacheBust}`" @error="shot.image = ''" class="w-full h-full object-cover">
+              <div v-else class="flex flex-col items-center justify-center text-center p-2 space-y-2">
+                <i class="fa-solid fa-image text-gray-600 text-xl"></i>
+                <span class="text-[10px] text-gray-500">待绘制剧照</span>
+                <button @click.stop="quickGenerateShotImage(shot)" :disabled="shot._genImg" class="px-2 py-0.5 rounded bg-cyan-950 text-brand-cyan border border-cyan-700/60 text-[10px] hover:bg-cyan-900 transition">
+                  {{ shot._genImg ? '绘制中...' : '生成此镜' }}
+                </button>
+              </div>
               <span class="absolute top-1 left-1 px-1.5 py-0.5 rounded bg-black/80 text-[10px] text-brand-cyan font-bold font-mono">
                 #{{ shot.id < 10 ? '0' + shot.id : shot.id }}
               </span>
             </div>
 
             <!-- 分镜详情 -->
-            <div class="flex-1 flex flex-col justify-between py-1">
+            <div class="flex-1 flex flex-col justify-between py-0.5 min-w-0">
               <div>
-                <!-- 镜头标签 -->
-                <div class="flex items-center justify-between mb-2">
-                  <div class="flex items-center space-x-2">
+                <!-- 镜头标签与操作组（防折行挤压，支持上移/下移/改词/删除） -->
+                <div class="flex items-start justify-between gap-2 mb-2">
+                  <div class="flex flex-wrap items-center gap-1.5 flex-1 min-w-0">
                     <span class="px-2 py-0.5 rounded text-[10px] font-bold bg-brand-border text-cyan-300">
                       {{ shot.scale }}
                     </span>
                     <span class="px-2 py-0.5 rounded text-[10px] font-bold bg-purple-950 text-purple-300 border border-purple-800">
                       {{ shot.motion_name }}
                     </span>
-                    <span v-if="shot.sfx !== '无'" class="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-950 text-amber-300 border border-amber-800">
+                    <span v-if="shot.sfx && shot.sfx !== '无'" class="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-950 text-amber-300 border border-amber-800">
                       <i class="fa-solid fa-bolt mr-1"></i>{{ shot.sfx }}
                     </span>
+                    <span class="text-[10px] text-gray-500 font-mono">{{ shot.duration || shot.duration_seconds || 4.0 }}s</span>
                   </div>
-                  <button 
-                    @click.stop="openShotEditor(shot)"
-                    class="px-2.5 py-1 rounded bg-brand-dark hover:bg-brand-border border border-cyan-500/40 text-[11px] text-brand-cyan flex items-center space-x-1 transition"
-                  >
-                    <i class="fa-solid fa-pen-to-square"></i>
-                    <span>改词/重绘</span>
-                  </button>
+                  <div class="flex items-center space-x-1 flex-shrink-0">
+                    <button @click.stop="reorderShot(shot.id, 'up')" :disabled="shot.id === 1" class="px-1.5 py-1 rounded bg-brand-dark hover:bg-brand-border border border-brand-border text-[10px] text-gray-400 hover:text-white disabled:opacity-30 transition" title="上移此镜">
+                      <i class="fa-solid fa-arrow-up"></i>
+                    </button>
+                    <button @click.stop="reorderShot(shot.id, 'down')" :disabled="shot.id === project.shots.length" class="px-1.5 py-1 rounded bg-brand-dark hover:bg-brand-border border border-brand-border text-[10px] text-gray-400 hover:text-white disabled:opacity-30 transition" title="下移此镜">
+                      <i class="fa-solid fa-arrow-down"></i>
+                    </button>
+                    <button 
+                      @click.stop="openShotEditor(shot)"
+                      class="px-2 py-1 rounded bg-brand-dark hover:bg-brand-border border border-cyan-500/40 text-[11px] text-brand-cyan flex items-center space-x-1 transition whitespace-nowrap"
+                    >
+                      <i class="fa-solid fa-pen-to-square"></i>
+                      <span>改词/重绘</span>
+                    </button>
+                    <button @click.stop="deleteShot(shot.id)" class="px-1.5 py-1 rounded bg-brand-dark hover:bg-rose-950/70 border border-brand-border hover:border-rose-700/60 text-[10px] text-gray-400 hover:text-rose-300 transition" title="删除此镜">
+                      <i class="fa-solid fa-trash-can"></i>
+                    </button>
+                  </div>
                 </div>
 
                 <!-- 说话人与台词 -->
-                <div class="flex items-baseline space-x-2 mb-1.5">
+                <div class="flex items-baseline space-x-2 mb-1">
                   <span class="font-bold text-sm text-amber-300">【{{ shot.speaker }}】</span>
                 </div>
-                <p class="text-sm text-gray-200 font-medium leading-relaxed">
+                <p class="text-sm text-gray-200 font-medium leading-relaxed break-words">
                   {{ shot.dialogue }}
                 </p>
               </div>
 
-              <!-- 底部音频控制器 -->
-              <div class="flex items-center justify-between border-t border-gray-800/80 pt-2 mt-2">
-                <audio :src="`${shot.audio}?t=${cacheBust}`" controls class="h-6 w-56"></audio>
-                <div class="text-[11px] text-gray-500">
-                  <i class="fa-solid fa-check-circle text-emerald-400 mr-1"></i>音视频对齐
+              <!-- 底部音频控制器（按需合成，绝不发 404 / ERR_ABORTED） -->
+              <div class="flex flex-wrap items-center justify-between gap-2 border-t border-gray-800/80 pt-2 mt-2">
+                <audio v-if="shot.audio" :src="`${shot.audio}?t=${cacheBust}`" controls class="h-8 w-full max-w-full sm:w-64"></audio>
+                <button v-else @click.stop="quickGenerateShotAudio(shot)" :disabled="shot._genAud" class="px-2.5 py-1 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/40 text-amber-300 text-[11px] flex items-center space-x-1.5 transition">
+                  <i :class="shot._genAud ? 'fa-solid fa-spinner fa-spin' : 'fa-solid fa-volume-high'"></i>
+                  <span>{{ shot._genAud ? '合成配音中...' : '生成并试听此镜配音' }}</span>
+                </button>
+                <div class="text-[11px]" :class="shot.image && shot.audio ? 'text-emerald-400' : 'text-gray-500'">
+                  <i :class="shot.image && shot.audio ? 'fa-solid fa-check-circle mr-1' : 'fa-regular fa-clock mr-1'"></i>
+                  <span>{{ shot.image && shot.audio ? '音画已就绪' : '待渲染音画' }}</span>
                 </div>
               </div>
             </div>
@@ -320,14 +367,33 @@
         </div>
       </section>
 
-      <!-- 右栏：院线级监视器与成片播放器 (440px) -->
-      <aside class="w-[440px] border-l border-brand-border bg-brand-dark p-6 flex flex-col space-y-4 overflow-y-auto flex-shrink-0">
+      <!-- 右栏：院线级监视器、实时渲染日志终端与成片播放器 -->
+      <aside :class="mobileTab === 'player' ? 'flex' : 'hidden lg:flex'" class="w-full lg:w-[420px] border-l border-brand-border bg-brand-dark p-4 pb-20 lg:p-5 flex-col space-y-3.5 overflow-y-auto flex-shrink-0 min-h-0">
         <h2 class="text-xs font-bold text-gray-400 uppercase tracking-wider flex items-center justify-between">
-          <span><i class="fa-solid fa-tv text-brand-cyan mr-1.5"></i> 院线级主监视器 (Master Player)</span>
-          <span class="text-xs text-brand-cyan font-mono">1080P · 24FPS</span>
+          <span><i class="fa-solid fa-tv text-brand-cyan mr-1.5"></i> 院线级主监视器</span>
+          <span class="text-xs text-brand-cyan font-mono">720×1280 · 24FPS</span>
         </h2>
 
-        <!-- 播放模式切换 Tab -->
+        <!-- 实时制片渲染进度与日志面板（彻底告别 90% 黑盒干等） -->
+        <div v-if="renderState.is_rendering || renderState.error || (renderState.logs && renderState.logs.length > 1)" class="p-3 rounded-xl bg-brand-card border text-xs space-y-2" :class="renderState.error ? 'border-rose-500/60' : 'border-emerald-500/40'">
+          <div class="flex items-center justify-between gap-2">
+            <span class="font-bold truncate" :class="renderState.error ? 'text-rose-400' : 'text-emerald-400'">
+              <i :class="renderState.is_rendering ? 'fa-solid fa-spinner fa-spin mr-1' : (renderState.error ? 'fa-solid fa-triangle-exclamation mr-1' : 'fa-solid fa-circle-check mr-1')"></i>
+              {{ renderState.current_step }}
+            </span>
+            <button @click="resetRenderState" class="px-2 py-0.5 rounded bg-rose-950/70 hover:bg-rose-900 text-rose-300 border border-rose-700/60 text-[10px] whitespace-nowrap flex-shrink-0">
+              重置机房
+            </button>
+          </div>
+          <div class="w-full bg-gray-800 rounded-full h-1.5 overflow-hidden">
+            <div class="bg-gradient-to-r from-brand-cyan to-emerald-400 h-full transition-all duration-300" :style="{ width: (renderState.progress || 0) + '%' }"></div>
+          </div>
+          <div class="max-h-24 overflow-y-auto bg-black/60 rounded-lg p-2 font-mono text-[10px] text-gray-300 space-y-0.5">
+            <div v-for="(lg, idx) in (renderState.logs || []).slice(-6)" :key="idx" class="break-all">{{ lg }}</div>
+          </div>
+        </div>
+
+        <!-- 播放模式切换 Tab（全部使用真实动态时长与镜数，绝不硬编码 61s） -->
         <div class="flex items-center space-x-2 bg-brand-card p-1 rounded-xl border border-brand-border">
           <button 
             @click="activeVideoMode = 'full'"
@@ -335,7 +401,7 @@
             class="flex-1 py-1.5 rounded-lg text-xs transition flex items-center justify-center space-x-1"
           >
             <i class="fa-solid fa-clapperboard text-[11px]"></i>
-            <span>全片 61s 电影级成片</span>
+            <span>全片成片 ({{ Number(project.duration || 0).toFixed(1) }}s)</span>
           </button>
           <button 
             @click="activeVideoMode = 'live'"
@@ -343,51 +409,78 @@
             class="flex-1 py-1.5 rounded-lg text-xs transition flex items-center justify-center space-x-1"
           >
             <i class="fa-solid fa-person-running text-[11px]"></i>
-            <span>🔥 真人演员活化 (口型+眨眼)</span>
+            <span>真人活化版</span>
           </button>
         </div>
 
         <!-- 播放器主体 -->
-        <div class="w-full aspect-[9/16] rounded-2xl overflow-hidden bg-black border border-brand-border shadow-2xl relative">
+        <div class="w-full aspect-[9/16] max-h-[52vh] rounded-2xl overflow-hidden bg-black border border-brand-border shadow-2xl relative flex items-center justify-center">
           <video 
+            v-if="activeVideoMode === 'full' ? project.video_url : project.live_actor_video"
             ref="masterVideo"
-            :src="activeVideoMode === 'full' ? project.video_url : project.live_actor_video" 
+            :src="`${activeVideoMode === 'full' ? project.video_url : project.live_actor_video}&t=${cacheBust}`" 
             controls 
-            autoplay 
-            loop 
+            playsinline
             class="w-full h-full object-contain"
           ></video>
+          <div v-else class="text-center p-6 text-gray-500 space-y-2">
+            <i class="fa-solid fa-video-slash text-3xl text-gray-700"></i>
+            <p class="text-xs">当前剧集尚未合成视频成片</p>
+            <p class="text-[11px] text-gray-600">生成分镜后点击顶部「合成成片」即可预览</p>
+          </div>
         </div>
 
-        <!-- 播放器信息面板 -->
+        <!-- 播放器信息面板（全部绑定真实数据） -->
         <div class="p-3.5 rounded-xl bg-brand-card border border-brand-border text-xs space-y-2">
           <div class="flex justify-between text-gray-400">
             <span>分辨率:</span>
-            <span class="text-gray-200 font-mono">720 × 1280 (9:16 竖屏短剧)</span>
+            <span class="text-gray-200 font-mono">720 × 1280 (9:16 竖屏)</span>
           </div>
           <div class="flex justify-between text-gray-400">
             <span>总时长:</span>
-            <span class="text-gray-200 font-mono">{{ project.duration }} 秒 (全 10 镜完结)</span>
+            <span class="text-gray-200 font-mono">{{ Number(project.duration || 0).toFixed(1) }} 秒 (共 {{ project.shots.length }} 镜)</span>
           </div>
           <div class="flex justify-between text-gray-400">
             <span>声音系统:</span>
-            <span class="text-emerald-400 font-semibold">三轨合一影视级母带 (AAC 256k)</span>
+            <span class="text-emerald-400 font-semibold">三轨合一影视级母带 (AAC 192k)</span>
           </div>
           <div class="flex justify-between text-gray-400">
-            <span>运镜渲染:</span>
-            <span class="text-brand-cyan font-semibold">FFmpeg 2.5D 电影级动态滤波</span>
+            <span>渲染选项:</span>
+            <label class="inline-flex items-center space-x-1.5 text-gray-300 cursor-pointer">
+              <input type="checkbox" v-model="includeLiveActor" class="rounded bg-brand-dark border-gray-600">
+              <span>同时渲染真人活化版（较慢）</span>
+            </label>
           </div>
         </div>
 
         <!-- 快捷操作按钮 -->
-        <div class="pt-2">
-          <a :href="project.video_url" download class="w-full py-3 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-black font-bold text-sm text-center block transition shadow-xl shadow-cyan-500/25">
+        <div class="pt-1">
+          <a v-if="project.video_url" :href="`/api/video/download?mode=${activeVideoMode}`" download class="w-full py-2.5 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-black font-bold text-sm text-center block transition shadow-xl shadow-cyan-500/25">
             <i class="fa-solid fa-download mr-1.5"></i> 立即导出成片 MP4
           </a>
+          <button v-else disabled class="w-full py-2.5 rounded-xl bg-gray-800 text-gray-500 font-bold text-sm text-center block cursor-not-allowed">
+            <i class="fa-solid fa-download mr-1.5"></i> 合成成片后可导出 MP4
+          </button>
         </div>
       </aside>
 
     </main>
+
+    <!-- 移动端专属底部 Tab 导航栏（彻底解决手机端三栏挤压裁切） -->
+    <nav class="lg:hidden h-13 border-t border-brand-border bg-brand-dark grid grid-cols-3 flex-shrink-0 text-xs">
+      <button @click="mobileTab = 'storyboard'" :class="mobileTab === 'storyboard' ? 'text-brand-cyan bg-cyan-950/30 border-t-2 border-brand-cyan' : 'text-gray-400'" class="py-2 flex flex-col items-center justify-center space-y-0.5">
+        <i class="fa-solid fa-clapperboard"></i>
+        <span>分镜 ({{ project.shots.length }})</span>
+      </button>
+      <button @click="mobileTab = 'cast'" :class="mobileTab === 'cast' ? 'text-brand-cyan bg-cyan-950/30 border-t-2 border-brand-cyan' : 'text-gray-400'" class="py-2 flex flex-col items-center justify-center space-y-0.5">
+        <i class="fa-solid fa-users"></i>
+        <span>角色 ({{ project.characters.length }})</span>
+      </button>
+      <button @click="mobileTab = 'player'" :class="mobileTab === 'player' ? 'text-brand-cyan bg-cyan-950/30 border-t-2 border-brand-cyan' : 'text-gray-400'" class="py-2 flex flex-col items-center justify-center space-y-0.5">
+        <i class="fa-solid fa-tv"></i>
+        <span>监视器</span>
+      </button>
+    </nav>
 
     <!-- SOTA 顶配大模型配置 Modal -->
     <div v-if="showSotaModal" class="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
@@ -413,18 +506,18 @@
         <div class="p-6 overflow-y-auto space-y-4">
           
           <!-- 系统环境检测条 -->
-          <div class="p-3 rounded-xl bg-brand-dark/70 border border-brand-border flex items-center justify-between text-xs">
+          <div class="p-3 rounded-xl bg-brand-dark/70 border border-brand-border flex flex-wrap items-center justify-between gap-2 text-xs">
             <div class="flex items-center space-x-2">
-              <i class="fa-brands fa-windows text-blue-400"></i>
-              <span class="text-gray-300">系统剪映专业版:</span>
-              <span :class="sotaInfo.system.jianying_installed ? 'text-emerald-400' : 'text-amber-400'" class="font-mono">
-                {{ sotaInfo.system.jianying_installed ? '已就绪 (可一键直接写入草稿箱)' : '未找到默认安装目录' }}
+              <i class="fa-solid fa-scissors text-amber-400"></i>
+              <span class="text-gray-300">剪映草稿导出:</span>
+              <span class="text-emerald-400 font-mono">
+                {{ sotaInfo.system.jianying_installed ? '本地剪映直写 + ZIP 打包双就绪' : '云端模式（自动打包 ZIP 草稿工程下载）' }}
               </span>
             </div>
             <div class="flex items-center space-x-2">
               <i class="fa-solid fa-film text-purple-400"></i>
-              <span class="text-gray-300">FFmpeg 8.1:</span>
-              <span class="text-emerald-400 font-mono">硬件加速正常</span>
+              <span class="text-gray-300">FFmpeg 合成器:</span>
+              <span class="text-emerald-400 font-mono">正常就绪</span>
             </div>
           </div>
 
@@ -482,14 +575,29 @@
               </div>
               <p class="text-xs text-gray-400 mb-2">{{ item.role }}</p>
               
-              <!-- 密钥配置输入 -->
-              <div class="flex items-center space-x-2">
-                <input 
-                  type="password" 
-                  v-model="keyInputs[key]" 
-                  :placeholder="'输入对应 ' + item.env_key" 
-                  class="flex-1 bg-brand-card border border-brand-border rounded-lg px-3 py-1.5 text-xs text-gray-200 focus:outline-none focus:border-brand-cyan"
-                >
+              <!-- 密钥配置输入与真实连通性测活（拒绝坏 Key 假绿灯） -->
+              <div v-if="item.env_key && item.env_key !== 'COLAB_CLUSTER_TOKEN'" class="space-y-1.5">
+                <div class="flex items-center space-x-2">
+                  <input 
+                    type="password" 
+                    v-model="keyInputs[item.env_key]" 
+                    :placeholder="'输入对应 ' + item.env_key + (item.configured ? '（已配置，留空保持不变）' : '')" 
+                    class="flex-1 bg-brand-card border border-brand-border rounded-lg px-3 py-1.5 text-xs text-gray-200 focus:outline-none focus:border-brand-cyan"
+                  >
+                  <button 
+                    @click="testSingleApiKey(item.env_key)" 
+                    :disabled="keyTestState[item.env_key] && keyTestState[item.env_key].testing"
+                    class="px-2.5 py-1.5 rounded-lg bg-brand-card hover:bg-brand-border border border-cyan-500/40 text-brand-cyan text-[11px] font-semibold whitespace-nowrap transition disabled:opacity-50"
+                  >
+                    {{ (keyTestState[item.env_key] && keyTestState[item.env_key].testing) ? '测活中...' : '⚡ 测活' }}
+                  </button>
+                </div>
+                <div v-if="keyTestState[item.env_key] && keyTestState[item.env_key].detail" :class="keyTestState[item.env_key].ok ? 'text-emerald-400' : 'text-rose-400'" class="text-[11px]">
+                  {{ keyTestState[item.env_key].ok ? '✅ ' : '❌ ' }}{{ keyTestState[item.env_key].detail }}
+                </div>
+              </div>
+              <div v-else class="text-[11px] text-emerald-400/90">
+                ⚡ 请通过上方「Google Colab 三号联开免费显卡池」控制舱进行节点授权与一键预热
               </div>
             </div>
           </div>
@@ -500,7 +608,7 @@
         <div class="px-6 py-3.5 border-t border-brand-border bg-brand-dark flex items-center justify-between">
           <span class="text-xs text-gray-500">
             <i class="fa-solid fa-shield-halved text-emerald-400 mr-1"></i>
-            密钥将加密保存在本地环境 (.env)，不会上传到任何第三方
+            密钥受白名单进程隔离保护，绝不落盘明文泄漏
           </span>
           <div class="flex items-center space-x-3">
             <button @click="showSotaModal = false" class="px-4 py-1.5 rounded-lg text-xs text-gray-400 hover:text-white">
@@ -649,18 +757,34 @@
         </div>
 
         <div class="p-6 overflow-y-auto space-y-4 text-xs">
-          <!-- 番茄热榜区 -->
+          <!-- 番茄热榜与链接直导区 -->
           <div class="p-3.5 rounded-xl bg-brand-dark border border-orange-500/30 space-y-2.5">
-            <div class="flex items-center justify-between">
-              <span class="font-bold text-orange-300">🍅 番茄小说网实时热榜直通车</span>
-              <button @click="fetchFanqieRank" class="px-2.5 py-1 rounded bg-orange-600/30 hover:bg-orange-600/50 text-orange-200 border border-orange-500/40">
+            <div class="flex items-center justify-between gap-2">
+              <span class="font-bold text-orange-300">🍅 番茄小说实时热榜 / 链接直导</span>
+              <button @click="fetchFanqieRank" :disabled="isFetchingRank" class="px-2.5 py-1 rounded bg-orange-600/30 hover:bg-orange-600/50 text-orange-200 border border-orange-500/40 disabled:opacity-50">
                 {{ isFetchingRank ? '抓取中...' : '🔥 刷新实时热榜' }}
               </button>
+            </div>
+            <!-- 粘贴番茄链接或书籍 ID 直接抓取首章正文 -->
+            <div class="flex items-center space-x-2">
+              <input
+                v-model="fanqieUrlInput"
+                @keyup.enter="importFanqieByUrl"
+                type="text"
+                placeholder="粘贴番茄小说链接（fanqienovel.com/page/...）或作品 ID 直接拉取首章正文"
+                class="flex-1 bg-brand-card border border-brand-border rounded-lg px-2.5 py-1.5 text-xs text-gray-200 focus:outline-none focus:border-orange-400"
+              >
+              <button @click="importFanqieByUrl" :disabled="isImportingFanqie" class="px-3 py-1.5 rounded-lg bg-orange-500/80 hover:bg-orange-500 text-black font-bold text-xs whitespace-nowrap disabled:opacity-50">
+                {{ isImportingFanqie ? '拉取中...' : '抓取首章' }}
+              </button>
+            </div>
+            <div v-if="fanqieWarning" class="text-[11px] text-amber-300/90 bg-amber-950/30 border border-amber-700/40 rounded-lg px-2.5 py-1.5">
+              ⚠️ {{ fanqieWarning }}
             </div>
             <div v-if="fanqieBooks.length > 0" class="grid grid-cols-2 gap-2 max-h-36 overflow-y-auto">
               <div v-for="b in fanqieBooks" :key="b.book_id" @click="selectFanqieBook(b)" class="p-2 rounded bg-brand-card hover:border-orange-400 border border-brand-border cursor-pointer transition">
                 <div class="font-bold text-gray-100 truncate">《{{ b.title }}》</div>
-                <div class="text-[10px] text-orange-300">{{ b.category }} · {{ b.author }}</div>
+                <div class="text-[10px] text-orange-300 truncate">{{ b.genre || b.category || '番茄热门' }} · {{ b.author }}</div>
               </div>
             </div>
           </div>
@@ -706,6 +830,16 @@
           <div>
             <label class="block text-gray-400 mb-1">台词对白 / 旁白描述</label>
             <textarea v-model="editingShot.dialogue" rows="3" class="w-full bg-brand-dark border border-brand-border rounded-lg p-2.5 text-gray-100"></textarea>
+          </div>
+          <div>
+            <label class="block text-gray-400 mb-1">运镜方式 (Camera Motion)</label>
+            <select v-model="editingShot.motion" class="w-full bg-brand-dark border border-brand-border rounded-lg px-3 py-2 text-gray-100 focus:outline-none focus:border-brand-cyan">
+              <option value="ZOOM_IN">镜头推进 (ZOOM_IN · 聚焦情绪)</option>
+              <option value="ZOOM_OUT">镜头拉远 (ZOOM_OUT · 揭示全局)</option>
+              <option value="PAN_LEFT">向左横移 (PAN_LEFT · 空间跟拍)</option>
+              <option value="PAN_RIGHT">向右横移 (PAN_RIGHT · 反打切镜)</option>
+              <option value="SHAKE">镜头震撼 (SHAKE · 高潮冲击)</option>
+            </select>
           </div>
           <div>
             <label class="block text-gray-400 mb-1">AI 生图英文提示词 (Visual Prompt)</label>
@@ -784,7 +918,7 @@
               <label class="text-gray-400 font-medium">🎙️ 专属母带音色 (定音锁定)</label>
               <button @click="testVoiceSample(editingCharacter.voice)" :disabled="isPlayingSample" class="text-[11px] px-2.5 py-1 rounded bg-amber-500/20 text-amber-300 hover:bg-amber-500/30 border border-amber-500/40 transition flex items-center space-x-1">
                 <i :class="isPlayingSample ? 'fa-solid fa-spinner fa-spin' : 'fa-solid fa-volume-high'"></i>
-                <span>{{ isPlayingSample ? '正在合成试听...' : '🔊 试听选定配音' }}</span>
+                <span>{{ isPlayingSample ? '正在合成试听...' : '试听选定配音' }}</span>
               </button>
             </div>
             <div class="grid grid-cols-2 sm:grid-cols-3 gap-2 max-h-36 overflow-y-auto pr-1">
@@ -884,14 +1018,30 @@
           <button @click="showRefModal = false" class="text-gray-400 hover:text-white"><i class="fa-solid fa-xmark text-lg"></i></button>
         </div>
         <div class="p-6 space-y-4 max-h-[75vh] overflow-y-auto">
-          <div class="grid grid-cols-2 gap-4">
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
-              <label class="block text-gray-400 mb-1">参考爆款视频路径 / URL (留空自动使用黄金短剧卡点模板或本地样片)</label>
-              <input v-model="refForm.video_source" type="text" placeholder="例如: C:\videos\viral_hook.mp4 或留空" class="w-full bg-brand-dark border border-brand-border rounded-lg px-3 py-2 text-gray-100">
+              <label class="block text-gray-400 mb-1">方式 A：参考视频公网 HTTPS 链接（留空用黄金 3 秒模板）</label>
+              <input v-model="refForm.video_source" type="text" placeholder="输入公开 HTTPS 视频链接，或留空使用内置模板" class="w-full bg-brand-dark border border-brand-border rounded-lg px-3 py-2 text-gray-100">
             </div>
             <div>
               <label class="block text-gray-400 mb-1">仿写新短剧标题</label>
               <input v-model="refForm.title" type="text" placeholder="例如：龙王殿：退婚日百亿聘礼" class="w-full bg-brand-dark border border-brand-border rounded-lg px-3 py-2 text-gray-100">
+            </div>
+          </div>
+          <!-- 本地参考视频上传（真实 FFmpeg 场景切点探测） -->
+          <div class="p-3 rounded-xl bg-brand-dark border border-dashed border-rose-500/40 flex flex-wrap items-center justify-between gap-2">
+            <div class="flex items-center space-x-2 min-w-0">
+              <i class="fa-solid fa-cloud-arrow-up text-rose-400"></i>
+              <span class="text-gray-300 truncate">
+                {{ refUploadFile ? `已选本地参考视频：${refUploadFile.name} (${(refUploadFile.size / 1024 / 1024).toFixed(2)}MB)` : '方式 B：直接上传本地爆款参考视频 (.mp4 / .mov / .webm，≤60MB) 真 FFmpeg 切点拆解' }}
+              </span>
+            </div>
+            <div class="flex items-center space-x-2">
+              <label class="px-3 py-1 rounded-lg bg-rose-500/20 hover:bg-rose-500/30 border border-rose-500/40 text-rose-200 cursor-pointer font-semibold">
+                选择视频文件
+                <input type="file" accept=".mp4,.mov,.webm,.mkv,video/*" @change="onRefFileChange" class="hidden">
+              </label>
+              <button v-if="refUploadFile" @click="refUploadFile = null" class="px-2 py-1 rounded text-gray-400 hover:text-white">清除</button>
             </div>
           </div>
           <div>
@@ -987,13 +1137,34 @@
       </div>
     </div>
 
-    <!-- 成功通知 Toast -->
-    <div v-if="toast.show" class="fixed bottom-6 right-6 z-50 p-4 rounded-xl bg-brand-card border border-brand-cyan/60 shadow-2xl text-xs flex items-center space-x-3 text-gray-100 max-w-md animate-bounce">
-      <i class="fa-solid fa-circle-check text-brand-cyan text-base"></i>
-      <div class="flex-1">
+    <!-- 访问令牌鉴权弹窗（后端开启 API_AUTH_TOKEN 时自动唤起，彻底消除 401 死锁） -->
+    <div v-if="showAuthModal" class="fixed inset-0 z-[60] bg-black/85 backdrop-blur-sm flex items-center justify-center p-4">
+      <div class="w-full max-w-md bg-brand-card border border-brand-cyan/50 rounded-2xl shadow-2xl p-6 space-y-4 text-xs">
+        <div class="flex items-center space-x-2 text-brand-cyan">
+          <i class="fa-solid fa-lock text-base"></i>
+          <h3 class="font-bold text-sm">工作台访问授权验证</h3>
+        </div>
+        <p class="text-gray-400">当前云端工作台已启用安全防护，请输入管理员访问令牌（API_AUTH_TOKEN）以解锁全部接口与音视频流。</p>
+        <input v-model="authTokenInput" @keyup.enter="submitAuthToken" type="password" placeholder="粘贴 Bearer Token..." class="w-full bg-brand-dark border border-brand-border rounded-lg px-3 py-2 text-gray-100 focus:outline-none focus:border-brand-cyan">
+        <div v-if="authError" class="text-[11px] text-rose-400 bg-rose-950/40 border border-rose-700/50 rounded-lg px-2.5 py-1.5">
+          ❌ {{ authError }}
+        </div>
+        <div class="flex justify-end space-x-2">
+          <button @click="submitAuthToken" :disabled="isAuthenticating" class="px-4 py-2 rounded-lg bg-gradient-to-r from-cyan-500 to-blue-600 text-black font-bold disabled:opacity-50">
+            {{ isAuthenticating ? '校验中...' : '验证并进入' }}
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 成功通知 Toast（固定在右上角顶栏下方，绝不遮挡底部保存/下载按钮） -->
+    <div v-if="toast.show" class="fixed top-16 right-4 z-50 p-3.5 rounded-xl bg-brand-card/95 backdrop-blur border border-brand-cyan/60 shadow-2xl text-xs flex items-center space-x-3 text-gray-100 max-w-sm">
+      <i class="fa-solid fa-circle-check text-brand-cyan text-base flex-shrink-0"></i>
+      <div class="flex-1 min-w-0">
         <div class="font-bold text-brand-cyan">{{ toast.title }}</div>
         <div class="text-gray-300 text-[11px] mt-0.5 break-all">{{ toast.message }}</div>
       </div>
+      <button @click="toast.show = false" class="text-gray-400 hover:text-white flex-shrink-0"><i class="fa-solid fa-xmark"></i></button>
     </div>
 
   </div>
@@ -1016,8 +1187,8 @@
         storyboard_flow: "全景分镜列表",
         storyboard_sub: "点击任意分镜可在右侧立即试听与检查",
         master_player: "院线级主监视器",
-        full_movie_mode: "全片 61s 电影级成片",
-        live_actor_mode: "🔥 真人演员活化 (口型+眨眼)",
+        full_movie_mode: "全片电影级成片",
+        live_actor_mode: "真人演员活化",
         resolution: "分辨率",
         duration: "总时长",
         sound_system: "声音系统",
@@ -1026,7 +1197,7 @@
         episode_mgr: "多剧集连载管理",
         episode_sub: "长篇连续剧 · 跨集角色锁脸 · 自动切集",
         add_episode: "+ 新增分集",
-        auto_split: "📖 智能小说长篇切集",
+        auto_split: "智能小说长篇切集",
         status_completed: "已完结",
         status_storyboard: "分镜中",
         status_draft: "草稿",
@@ -1045,7 +1216,7 @@
         storyboard_flow: "Storyboard Flow",
         storyboard_sub: "Click any shot to audition and inspect camera blocking",
         master_player: "Master Cinema Monitor",
-        full_movie_mode: "Full Episode (61s Master)",
+        full_movie_mode: "Full Episode Master",
         live_actor_mode: "🔥 Neural Actor (LipSync + Eyes)",
         resolution: "Resolution",
         duration: "Duration",
@@ -1074,7 +1245,7 @@
         storyboard_flow: "絵コンテ・カット一覧",
         storyboard_sub: "クリックして試聴およびカメラワーク確認",
         master_player: "マスターシアターモニター",
-        full_movie_mode: "本編 61s 映画完成版",
+        full_movie_mode: "本編映画完成版",
         live_actor_mode: "🔥 実写化AI (口パク+瞬き)",
         resolution: "解像度",
         duration: "総尺",
@@ -1103,7 +1274,7 @@
         storyboard_flow: "스토리보드 컷 목록",
         storyboard_sub: "클릭하여 대사 청취 및 연출 확인",
         master_player: "마스터 시네마 모니터",
-        full_movie_mode: "전편 61s 영화 완성본",
+        full_movie_mode: "전편 영화 완성본",
         live_actor_mode: "🔥 실사화 AI (립싱크+눈깜빡임)",
         resolution: "해상도",
         duration: "총 시간",
@@ -1126,6 +1297,69 @@
         const currentLang = ref('zh');
         const t = (key) => (i18n[currentLang.value] && i18n[currentLang.value][key]) || key;
         const cacheBust = ref(Date.now());
+        const mobileTab = ref('storyboard');
+        const includeLiveActor = ref(false);
+        const showAuthModal = ref(false);
+        const authTokenInput = ref('');
+        const authError = ref('');
+        const isAuthenticating = ref(false);
+
+        // 全局透明鉴权拦截：自动为所有同源 API 请求附加 Bearer Token，遇到 401 自动弹出授权框
+        if (!window.__omnidramaFetchPatched) {
+          window.__omnidramaFetchPatched = true;
+          const _origFetch = window.fetch.bind(window);
+          window.fetch = async (input, init = {}) => {
+            const urlStr = typeof input === 'string' ? input : (input && input.url) || '';
+            const token = localStorage.getItem('omnidrama_auth_token') || '';
+            if (token && (urlStr.startsWith('/api/') || urlStr.startsWith('/output/'))) {
+              const headers = new Headers(init.headers || {});
+              if (!headers.has('Authorization')) {
+                headers.set('Authorization', `Bearer ${token}`);
+              }
+              init = { ...init, headers };
+            }
+            const resp = await _origFetch(input, init);
+            if (resp.status === 401 && urlStr.startsWith('/api/') && !urlStr.startsWith('/api/auth/')) {
+              showAuthModal.value = true;
+            }
+            return resp;
+          };
+        }
+
+        const submitAuthToken = async () => {
+          const tk = (authTokenInput.value || '').trim();
+          if (!tk) {
+            authError.value = '请输入访问令牌';
+            return;
+          }
+          authError.value = '';
+          isAuthenticating.value = true;
+          try {
+            const res = await fetch('/api/auth/session', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ token: tk })
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) {
+              authError.value = data.detail || '令牌校验失败，请检查输入';
+              return;
+            }
+            localStorage.setItem('omnidrama_auth_token', tk);
+            showAuthModal.value = false;
+            authTokenInput.value = '';
+            fetchVoices();
+            fetchArchetypes();
+            fetchProject();
+            fetchSeries();
+            fetchSotaStatus();
+            showNotice('授权成功', '会话已安全解锁，所有音视频流与操作已就绪。');
+          } catch (e) {
+            authError.value = '网络异常，无法连接服务器校验令牌';
+          } finally {
+            isAuthenticating.value = false;
+          }
+        };
 
         const project = ref({
           title: "",
@@ -1156,8 +1390,11 @@
         // AI 编剧与番茄热榜状态
         const showScriptModal = ref(false);
         const isFetchingRank = ref(false);
+        const isImportingFanqie = ref(false);
         const isGeneratingScript = ref(false);
         const fanqieBooks = ref([]);
+        const fanqieWarning = ref('');
+        const fanqieUrlInput = ref('');
         const scriptForm = ref({ title: '', genre: '都市爽文', novel_text: '' });
 
         // 5阶段合成与单镜编辑状态
@@ -1180,6 +1417,9 @@
           providers: {}
         });
         const keyInputs = ref({});
+        const keyTestState = ref({});
+        const localizeTargetLang = ref('en');
+        const isLocalizing = ref(false);
         const toast = ref({ show: false, title: '', message: '' });
 
         const showNotice = (title, message) => {
@@ -1192,11 +1432,14 @@
         const fetchProject = async () => {
           try {
             const res = await fetch('/api/project');
+            if (!res.ok) return;
             const data = await res.json();
-            project.value = data;
-            cacheBust.value = Date.now();
-            if (data.shots && data.shots.length > 0) {
-              selectedShot.value = data.shots[0];
+            if (data && Array.isArray(data.shots)) {
+              project.value = data;
+              cacheBust.value = Date.now();
+              if (data.shots.length > 0) {
+                selectedShot.value = data.shots[0];
+              }
             }
           } catch (e) {
             console.error('Failed to load project', e);
@@ -1212,32 +1455,87 @@
 
         const fetchFanqieRank = async () => {
           isFetchingRank.value = true;
+          fanqieWarning.value = '';
           try {
             const res = await fetch('/api/fanqie/rank?limit=8');
-            const data = await res.json();
-            if (data.books) fanqieBooks.value = data.books;
+            const data = await res.json().catch(() => ({}));
+            if (res.ok) {
+              fanqieBooks.value = Array.isArray(data.books) ? data.books : [];
+              if (data.status === 'degraded' || data.warning) {
+                fanqieWarning.value = data.warning || '番茄热榜暂时不可达，请直接粘贴番茄链接或手动输入剧本。';
+              } else if (fanqieBooks.value.length === 0) {
+                fanqieWarning.value = '暂未获取到热榜条目，请直接粘贴番茄小说链接或输入原创剧本。';
+              }
+            } else {
+              fanqieWarning.value = data.detail || '获取番茄热榜失败';
+            }
           } catch (e) {
-            showNotice('提示', '获取番茄小说热榜失败');
+            fanqieWarning.value = '网络请求异常，请直接粘贴番茄小说链接或手动输入剧本';
           } finally {
             isFetchingRank.value = false;
           }
         };
 
+        const _applyFanqieBookToForm = (book) => {
+          if (!book) return;
+          scriptForm.value.title = book.title || scriptForm.value.title || '番茄热榜短剧';
+          scriptForm.value.genre = book.genre || book.category || '热门网文';
+          const richText = (book.story_text || book.content || book.abstract || '').trim();
+          if (richText) {
+            scriptForm.value.novel_text = richText;
+          }
+        };
+
         const selectFanqieBook = async (b) => {
-          scriptForm.value.title = b.title;
-          scriptForm.value.genre = b.category || '热门网文';
-          scriptForm.value.novel_text = b.abstract || '';
+          _applyFanqieBookToForm(b);
+          isImportingFanqie.value = true;
           try {
             const res = await fetch('/api/fanqie/import', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ url_or_id: b.book_id })
             });
-            const data = await res.json();
-            if (data.book && data.book.content) {
-              scriptForm.value.novel_text = data.book.content;
+            const data = await res.json().catch(() => ({}));
+            if (res.ok && data.book) {
+              _applyFanqieBookToForm(data.book);
+              showNotice('已载入首章正文', `《${data.book.title || b.title}》首章剧情已自动填充！`);
             }
-          } catch (e) {}
+          } catch (e) {
+            console.warn('拉取番茄首章失败，保留简介文本', e);
+          } finally {
+            isImportingFanqie.value = false;
+          }
+        };
+
+        const importFanqieByUrl = async () => {
+          const target = (fanqieUrlInput.value || '').trim();
+          if (!target) {
+            showNotice('提示', '请先粘贴番茄小说链接（fanqienovel.com/page/...）或作品数字 ID');
+            return;
+          }
+          isImportingFanqie.value = true;
+          fanqieWarning.value = '';
+          try {
+            const res = await fetch('/api/fanqie/import', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ url_or_id: target })
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) {
+              fanqieWarning.value = data.detail || '导入失败，请检查番茄链接是否正确';
+              showNotice('番茄导入失败', fanqieWarning.value);
+              return;
+            }
+            if (data.book) {
+              _applyFanqieBookToForm(data.book);
+              showNotice('番茄导入成功', `已抓取《${data.book.title}》首章正文，点击下方即可一键拆解分镜！`);
+            }
+          } catch (e) {
+            showNotice('番茄导入失败', '网络异常，请稍后重试或直接粘贴正文');
+          } finally {
+            isImportingFanqie.value = false;
+          }
         };
 
         const generateNewScript = async () => {
@@ -1252,11 +1550,19 @@
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify(scriptForm.value)
             });
-            const data = await res.json();
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) {
+              showNotice('拆解失败', data.detail || `服务端返回错误 (${res.status})`);
+              return;
+            }
             project.value = data;
             cacheBust.value = Date.now();
+            if (data.shots && data.shots.length > 0) {
+              selectedShot.value = data.shots[0];
+            }
+            await fetchSeries();
             showScriptModal.value = false;
-            showNotice('剧本拆解成功', `已生成《${data.title}》共 ${data.shots.length} 个分镜！`);
+            showNotice('剧本拆解成功', `已生成《${data.title}》共 ${(data.shots || []).length} 个分镜！`);
           } catch (e) {
             showNotice('拆解失败', '请检查后端服务状态');
           } finally {
@@ -1264,31 +1570,108 @@
           }
         };
 
-        const triggerRenderPipeline = async () => {
-          try {
-            await fetch('/api/project/render', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ title: project.value.title, genre: project.value.genre })
-            });
-            renderState.value.is_rendering = true;
-            showNotice('启动合成', '5阶段全自动影视制片流水线已启动！');
-            const timer = setInterval(async () => {
-              try {
-                const r = await fetch('/api/project/render-status');
-                const st = await r.json();
-                renderState.value = st;
-                if (!st.is_rendering) {
-                  clearInterval(timer);
-                  await fetchProject();
+        let renderPollTimer = null;
+        const startRenderPolling = () => {
+          if (renderPollTimer) clearInterval(renderPollTimer);
+          renderPollTimer = setInterval(async () => {
+            try {
+              const r = await fetch('/api/project/render-status');
+              const st = await r.json();
+              renderState.value = st;
+              if (!st.is_rendering) {
+                clearInterval(renderPollTimer);
+                renderPollTimer = null;
+                await fetchProject();
+                await fetchSeries();
+                cacheBust.value = Date.now();
+                if (st.error) {
+                  showNotice('渲染异常', st.error);
+                } else {
                   showNotice('成片已就绪', st.current_step);
                 }
-              } catch (err) {
-                clearInterval(timer);
               }
-            }, 2000);
+            } catch (err) {
+              clearInterval(renderPollTimer);
+              renderPollTimer = null;
+            }
+          }, 2000);
+        };
+
+        const triggerRenderPipeline = async () => {
+          try {
+            const res = await fetch('/api/project/render', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                title: project.value.title,
+                genre: project.value.genre,
+                include_live_actor: includeLiveActor.value
+              })
+            });
+            const data = await res.json();
+            if (data.state) renderState.value = data.state;
+            renderState.value.is_rendering = true;
+            showNotice('启动合成', includeLiveActor.value ? '已启动全自动成片 + 真人活化渲染流水线！' : '已启动极速标准成片渲染流水线！');
+            startRenderPolling();
           } catch (e) {
             showNotice('启动失败', '无法启动渲染流水线');
+          }
+        };
+
+        const resetRenderState = async () => {
+          try {
+            const res = await fetch('/api/project/render-reset', { method: 'POST' });
+            const data = await res.json();
+            if (data.state) renderState.value = data.state;
+            if (renderPollTimer) {
+              clearInterval(renderPollTimer);
+              renderPollTimer = null;
+            }
+            showNotice('机房已重置', '渲染状态已归零，可随时重新发起合成。');
+          } catch (e) {
+            showNotice('重置失败', '无法连接后端服务');
+          }
+        };
+
+        const quickGenerateShotImage = async (shot) => {
+          shot._genImg = true;
+          try {
+            const res = await fetch(`/api/shots/${shot.id}/image`, { method: 'POST' });
+            if (res.ok) {
+              shot.image = `/api/shots/${shot.id}/image`;
+              shot.has_image = true;
+              cacheBust.value = Date.now();
+              showNotice('剧照已生成', `第 #${shot.id} 镜剧照绘制完成！`);
+            } else {
+              showNotice('绘制失败', '请检查后端日志或稍后重试');
+            }
+          } catch (e) {
+            showNotice('绘制失败', '网络请求异常');
+          } finally {
+            shot._genImg = false;
+          }
+        };
+
+        const quickGenerateShotAudio = async (shot) => {
+          shot._genAud = true;
+          try {
+            const res = await fetch(`/api/shots/${shot.id}/audio`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ text: shot.dialogue, speaker: shot.speaker })
+            });
+            if (res.ok) {
+              shot.audio = `/api/shots/${shot.id}/audio`;
+              shot.has_audio = true;
+              cacheBust.value = Date.now();
+              showNotice('配音已就绪', `第 #${shot.id} 镜配音合成完成，可点击播放器试听！`);
+            } else {
+              showNotice('配音失败', '无法合成该镜配音');
+            }
+          } catch (e) {
+            showNotice('配音失败', '网络请求异常');
+          } finally {
+            shot._genAud = false;
           }
         };
 
@@ -1314,7 +1697,11 @@
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify(editingShot.value)
             });
-            const data = await res.json();
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) {
+              showNotice('更新失败', data.detail || `修改第 #${sid} 镜失败 (${res.status})`);
+              return;
+            }
             project.value = data;
             cacheBust.value = Date.now();
             editingShot.value = null;
@@ -1329,11 +1716,15 @@
         const fetchSeries = async () => {
           try {
             const res = await fetch('/api/series');
+            if (!res.ok) return;
             const data = await res.json();
             if (data.series && data.series.length > 0) {
-              activeSeries.value = data.series[0];
-              if (activeSeries.value.episodes && activeSeries.value.episodes.length > 0) {
-                currentEpisode.value = activeSeries.value.episodes[0];
+              const matchedSeries = data.series.find(s => s.id === (project.value.series_id || data.active_series_id)) || data.series[0];
+              activeSeries.value = matchedSeries;
+              if (matchedSeries.episodes && matchedSeries.episodes.length > 0) {
+                const targetEpId = project.value.episode_id || (currentEpisode.value && currentEpisode.value.id);
+                const matchedEp = targetEpId ? matchedSeries.episodes.find(e => e.id === targetEpId) : null;
+                currentEpisode.value = matchedEp || matchedSeries.episodes[0];
               }
             }
           } catch (e) {
@@ -1344,19 +1735,29 @@
         const switchEpisode = async (ep) => {
           currentEpisode.value = ep;
           showEpisodeModal.value = false;
-          if (ep.story_text && ep.story_text.trim()) {
-            const res = await fetch('/api/project/generate', {
+          try {
+            const selRes = await fetch('/api/series/select-episode', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
-                title: ep.title,
-                genre: activeSeries.value.genre || '都市爽文',
-                novel_text: ep.story_text
+                episode_id: ep.id,
+                series_id: activeSeries.value.id
               })
             });
-            project.value = await res.json();
-            cacheBust.value = Date.now();
-          }
+            if (selRes.ok) {
+              const selData = await selRes.json();
+              if (selData.project) {
+                project.value = selData.project;
+                cacheBust.value = Date.now();
+                if (selData.project.story_text) {
+                  scriptForm.value.title = selData.project.title || ep.title;
+                  scriptForm.value.novel_text = selData.project.story_text;
+                }
+              }
+              showNotice('已切换剧集', `当前工作台已加载：${ep.title}`);
+              return;
+            }
+          } catch (e) {}
           showNotice('切换剧集', `已进入 ${ep.title}`);
         };
 
@@ -1386,13 +1787,22 @@
             const res = await fetch('/api/series/split-novel', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ novel_text: novelText.value.trim() })
+              body: JSON.stringify({
+                novel_text: novelText.value.trim(),
+                series_id: activeSeries.value.id,
+                persist: true
+              })
             });
             const data = await res.json();
-            showNotice('切集成功', `智能小说切集完成，共拆分出 ${data.count} 集连载剧！`);
+            if (data.registry && data.registry.series && data.registry.series.length > 0) {
+              const matched = data.registry.series.find(s => s.id === data.registry.active_series_id) || data.registry.series[0];
+              activeSeries.value = matched;
+            } else {
+              await fetchSeries();
+            }
+            showNotice('切集已入库', `智能小说切集完成，已将 ${data.count} 集连载剧写入剧集列表！`);
             showSplitInput.value = false;
             novelText.value = '';
-            fetchSeries();
           } catch (e) {
             showNotice('切集失败', '解析小说失败');
           }
@@ -1409,18 +1819,167 @@
         };
 
         const saveKeys = async () => {
+          const payloadKeys = {};
+          for (const [envKey, val] of Object.entries(keyInputs.value || {})) {
+            if (envKey && envKey !== 'COLAB_CLUSTER_TOKEN' && typeof val === 'string' && val.trim()) {
+              payloadKeys[envKey] = val.trim();
+            }
+          }
+          if (Object.keys(payloadKeys).length === 0) {
+            showNotice('提示', '请先输入至少一项模型 API 密钥');
+            return;
+          }
           try {
             const res = await fetch('/api/sota/save-keys', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ keys: keyInputs.value })
+              body: JSON.stringify({ keys: payloadKeys })
             });
-            const data = await res.json();
-            showNotice('配置成功', data.message);
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) {
+              showNotice('保存失败', data.detail || `服务端拒绝了配置 (${res.status})`);
+              return;
+            }
+            keyInputs.value = {};
+            showNotice('配置成功', data.message || `已保存 ${data.updated_count || 0} 项密钥！`);
             showSotaModal.value = false;
             fetchSotaStatus();
           } catch (e) {
-            showNotice('保存失败', '无法保存配置');
+            showNotice('保存失败', '无法连接服务器保存配置');
+          }
+        };
+
+        const testSingleApiKey = async (envKey) => {
+          keyTestState.value[envKey] = { testing: true, ok: false, detail: '' };
+          try {
+            const res = await fetch('/api/sota/test-key', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                env_key: envKey,
+                api_key: (keyInputs.value[envKey] || '').trim() || undefined
+              })
+            });
+            const data = await res.json().catch(() => ({}));
+            keyTestState.value[envKey] = {
+              testing: false,
+              ok: Boolean(res.ok && data.ok),
+              detail: data.detail || (res.ok ? '测活完成' : `HTTP ${res.status}`)
+            };
+          } catch (e) {
+            keyTestState.value[envKey] = { testing: false, ok: false, detail: '无法连接服务端执行测活' };
+          }
+        };
+
+        const addNewShot = async () => {
+          try {
+            const res = await fetch('/api/shots', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                speaker: (project.value.characters && project.value.characters[0] && project.value.characters[0].name) || '旁白',
+                dialogue: '请输入本镜台词或旁白...',
+                scale: 'CLOSE_UP',
+                motion: 'ZOOM_IN'
+              })
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) {
+              showNotice('新增失败', data.detail || `新增分镜失败 (${res.status})`);
+              return;
+            }
+            project.value = data;
+            cacheBust.value = Date.now();
+            const created = data.shots && data.shots[data.shots.length - 1];
+            if (created) {
+              selectedShot.value = created;
+              openShotEditor(created);
+            }
+            showNotice('分镜已新增', data.message || '已添加新分镜，请编辑台词');
+          } catch (e) {
+            showNotice('新增失败', '网络异常');
+          }
+        };
+
+        const deleteShot = async (shotId) => {
+          if (!confirm(`确定删除第 #${shotId} 镜吗？`)) return;
+          try {
+            const res = await fetch(`/api/shots/${shotId}`, { method: 'DELETE' });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) {
+              showNotice('删除失败', data.detail || `删除分镜失败 (${res.status})`);
+              return;
+            }
+            project.value = data;
+            cacheBust.value = Date.now();
+            showNotice('分镜已删除', data.message || `已移除第 #${shotId} 镜`);
+          } catch (e) {
+            showNotice('删除失败', '网络异常');
+          }
+        };
+
+        const reorderShot = async (shotId, direction) => {
+          try {
+            const res = await fetch('/api/shots/reorder', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ shot_id: shotId, direction })
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) {
+              showNotice('调整失败', data.detail || '调整镜序失败');
+              return;
+            }
+            project.value = data;
+            cacheBust.value = Date.now();
+          } catch (e) {
+            showNotice('调整失败', '网络异常');
+          }
+        };
+
+        const resetWorkspaceProject = async () => {
+          if (!confirm('确定清空当前工作台以新建一部全新短剧吗？（历史剧集存档不受影响）')) return;
+          try {
+            const res = await fetch('/api/project/reset', { method: 'POST' });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) {
+              showNotice('清空失败', data.detail || '无法重置工作台');
+              return;
+            }
+            project.value = data;
+            selectedShot.value = {};
+            currentEpisode.value = {};
+            cacheBust.value = Date.now();
+            showNotice('工作台已重置', '可随时点击「AI 编剧/热榜」开启全新短剧！');
+          } catch (e) {
+            showNotice('清空失败', '网络异常');
+          }
+        };
+
+        const localizeProject = async () => {
+          if (!project.value.shots || project.value.shots.length === 0) return;
+          isLocalizing.value = true;
+          try {
+            const res = await fetch('/api/project/localize', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                target_lang: localizeTargetLang.value,
+                bilingual_subtitle: false
+              })
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) {
+              showNotice('出海译制失败', data.detail || `服务端错误 (${res.status})`);
+              return;
+            }
+            project.value = data;
+            cacheBust.value = Date.now();
+            showNotice('出海译制完成', data.message || '全剧台词与母语声线已切换，点击「合成成片」即可出片！');
+          } catch (e) {
+            showNotice('出海译制失败', '网络异常，请稍后重试');
+          } finally {
+            isLocalizing.value = false;
           }
         };
 
@@ -1477,10 +2036,22 @@
           isExporting.value = true;
           try {
             const res = await fetch('/api/export-jianying', { method: 'POST' });
-            const data = await res.json();
-            showNotice('剪映草稿导出成功', data.message);
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) {
+              showNotice('导出失败', data.detail || `剪映导出错误 (${res.status})`);
+              return;
+            }
+            if (data.download_url) {
+              const a = document.createElement('a');
+              a.href = data.download_url;
+              a.download = data.zip_filename || 'jianying_draft.zip';
+              document.body.appendChild(a);
+              a.click();
+              document.body.removeChild(a);
+            }
+            showNotice('剪映草稿包已开始下载', data.message);
           } catch (e) {
-            showNotice('导出失败', '请检查剪映草稿路径');
+            showNotice('导出失败', '请检查剪映草稿导出接口');
           } finally {
             isExporting.value = false;
           }
@@ -1489,12 +2060,18 @@
         // OpenMontage 爆款视频拆解与导演质检门禁状态
         const showRefModal = ref(false);
         const isAnalyzingRef = ref(false);
+        const refUploadFile = ref(null);
         const refForm = ref({
           video_source: '',
           title: '龙王殿：退婚日百亿聘礼',
           novel_text: '林家寿宴之上，未婚妻当众甩出一纸退婚书嘲讽叶辰只是个送外卖的废物。下一秒，门外百架武装直升机轰鸣降落，全球首富跪地高呼恭迎至尊龙王归位！'
         });
         const refResult = ref(null);
+
+        const onRefFileChange = (event) => {
+          const files = event && event.target && event.target.files;
+          refUploadFile.value = (files && files[0]) ? files[0] : null;
+        };
 
         const showQualityModal = ref(false);
         const isCheckingQuality = ref(false);
@@ -1503,17 +2080,35 @@
         const runReferenceAnalysis = async () => {
           isAnalyzingRef.value = true;
           try {
-            const res = await fetch('/api/project/analyze-reference', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                video_source: refForm.value.video_source,
-                title: refForm.value.title,
-                novel_text: refForm.value.novel_text,
-                adapt_and_save: true
-              })
-            });
-            const data = await res.json();
+            let res;
+            if (refUploadFile.value) {
+              const fd = new FormData();
+              fd.append('file', refUploadFile.value);
+              fd.append('title', refForm.value.title || '爆款节奏仿写短剧');
+              fd.append('genre', project.value.genre || '都市战神爽文');
+              fd.append('novel_text', refForm.value.novel_text || '');
+              fd.append('adapt_and_save', 'true');
+              res = await fetch('/api/project/analyze-reference-upload', {
+                method: 'POST',
+                body: fd
+              });
+            } else {
+              res = await fetch('/api/project/analyze-reference', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  video_source: refForm.value.video_source,
+                  title: refForm.value.title,
+                  novel_text: refForm.value.novel_text,
+                  adapt_and_save: true
+                })
+              });
+            }
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) {
+              showNotice('拆解失败', data.detail || `参考视频解析错误 (${res.status})`);
+              return;
+            }
             refResult.value = data.reference_breakdown;
             if (data.adapted_storyboard) {
               project.value = data.adapted_storyboard;
@@ -1521,10 +2116,13 @@
               if (data.adapted_storyboard.shots && data.adapted_storyboard.shots.length > 0) {
                 selectedShot.value = data.adapted_storyboard.shots[0];
               }
+              await fetchSeries();
               showNotice('1:1 节奏仿写完成', `已按爆款视频节奏 (${data.reference_breakdown.cuts_per_minute}切/分) 生成《${data.adapted_storyboard.title}》！`);
+            } else {
+              showNotice('参考视频拆解完成', `已提取 ${data.reference_breakdown.cuts_per_minute} 切/分 节奏模板！`);
             }
           } catch (e) {
-            showNotice('拆解失败', '请检查视频路径或后端日志');
+            showNotice('拆解失败', '请检查视频文件/链接或后端日志');
           } finally {
             isAnalyzingRef.value = false;
           }
@@ -1538,13 +2136,17 @@
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ auto_fix: autoFix, budget_limit_usd: 2.0 })
             });
-            const data = await res.json();
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) {
+              showNotice('质检失败', data.detail || `导演质检异常 (${res.status})`);
+              return;
+            }
             qualityData.value = data;
             if (data.project) {
               project.value = data.project;
               cacheBust.value = Date.now();
             }
-            if (autoFix) {
+            if (autoFix && data.after_quality) {
               showNotice('导演质检通过', `反PPT风险分: ${data.after_quality.risk_score}/100 · ${data.after_quality.verdict}`);
             }
           } catch (e) {
@@ -1752,19 +2354,36 @@
           }
         };
 
-        onMounted(() => {
+        onMounted(async () => {
           fetchVoices();
           fetchArchetypes();
-
           fetchProject();
           fetchSeries();
           fetchSotaStatus();
+          try {
+            const rs = await fetch('/api/project/render-status');
+            if (rs.ok) {
+              const st = await rs.json();
+              renderState.value = st;
+              if (st.is_rendering) startRenderPolling();
+            }
+          } catch (e) {}
         });
 
         return {
           currentLang,
           t,
           cacheBust,
+          mobileTab,
+          includeLiveActor,
+          showAuthModal,
+          authTokenInput,
+          authError,
+          isAuthenticating,
+          submitAuthToken,
+          resetRenderState,
+          quickGenerateShotImage,
+          quickGenerateShotAudio,
           project,
           activeSeries,
           currentEpisode,
@@ -1774,12 +2393,16 @@
           newEpisodeTitle,
           showScriptModal,
           isFetchingRank,
+          isImportingFanqie,
           isGeneratingScript,
           fanqieBooks,
+          fanqieWarning,
+          fanqieUrlInput,
           scriptForm,
           openScriptModal,
           fetchFanqieRank,
           selectFanqieBook,
+          importFanqieByUrl,
           generateNewScript,
           renderState,
           triggerRenderPipeline,
@@ -1796,14 +2419,25 @@
           isExporting,
           sotaInfo,
           keyInputs,
+          keyTestState,
+          localizeTargetLang,
+          isLocalizing,
           toast,
           saveKeys,
+          testSingleApiKey,
+          addNewShot,
+          deleteShot,
+          reorderShot,
+          resetWorkspaceProject,
+          localizeProject,
           warmupColabCluster,
           releaseColabCluster,
           openColabOAuth,
           exportToJianying,
           showRefModal,
           isAnalyzingRef,
+          refUploadFile,
+          onRefFileChange,
           refForm,
           refResult,
           runReferenceAnalysis,

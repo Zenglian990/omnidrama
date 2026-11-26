@@ -777,12 +777,67 @@ class DirectorAgent:
                 if len(re.sub(r"[。，、！？!?,.\s\"'“”]", "", rl)) >= 3:
                     lines.append(rl)
 
+        # 若整段剧情拆完不足 3 镜且不含引号对白（例如用户输入 1~2 句精炼故事梗概），
+        # 按冲突节拍拆分出多镜分镜，杜绝短剧情退化成单镜/双镜“幻灯片”
+        if 1 <= len(lines) <= 2 and all('"' not in ln and '“' not in ln for ln in lines):
+            merged_plain = "，".join(lines)
+            beat_parts = [
+                p.strip()
+                for p in re.split(r"[，,；;。！？!?]+", merged_plain)
+                if len(re.sub(r"\s+", "", p)) >= 4
+            ]
+            if len(beat_parts) >= 3:
+                lines = beat_parts
+
         if not lines:
             lines = [raw_text.strip() or f"《{title}》序幕拉开，宿命对决一触即发！"]
 
-        # 3. 预扫描小说主要男女主姓名
+        # 3. 预扫描小说主要男女主姓名（同时兼容带引号对白体与无引号第三人称叙事梗概）
         main_female = ""
         main_male = ""
+        narrative_action_names: List[str] = []
+        _COMMON_SURNAMES = (
+            "赵钱孙李周吴郑王冯陈褚卫蒋沈韩杨朱秦尤许何吕施张孔曹严华金魏陶姜"
+            "戚谢邹喻柏水窦章云苏潘葛奚范彭郎鲁韦昌马苗凤花方俞任袁柳酆鲍史唐"
+            "费廉岑薛雷贺倪汤滕殷罗毕郝邬安常乐于时傅皮卞齐康伍余元卜顾孟平黄"
+            "和穆萧尹姚邵湛汪祁毛禹狄米贝明臧计伏成戴谈宋茅庞熊纪舒屈项祝董梁"
+            "杜阮蓝闵席季麻强贾路娄危江童颜郭梅盛林刁钟徐邱骆高夏蔡田樊胡凌霍"
+            "虞万支柯昝管卢莫经房裘缪干解应宗丁宣贲邓郁单杭洪包诸左石崔吉钮龚"
+            "程嵇邢滑裴陆荣翁荀羊於惠甄曲家封芮羿储靳汲邴糜松井段富巫乌焦巴弓"
+            "牧隗山谷车侯宓蓬全郗班仰秋仲伊宫宁仇栾暴甘钭厉戎祖武符刘景詹束龙"
+            "叶幸司韶郜黎蓟薄印宿白怀蒲邰从鄂索咸籍赖卓蔺屠蒙池乔阴鬱胥能苍双"
+            "闻莘党翟谭贡劳逄姬申扶堵冉宰郦雍郤璩桑桂濮牛寿通边扈燕冀郏浦尚农"
+            "温别庄晏柴瞿阎充慕连茹习宦艾鱼容向古易慎戈廖庾终暨居衡步都耿满弘"
+            "匡国文寇广禄阙东欧殳沃利蔚越夔隆师巩厍聂晁勾敖融冷訾辛阚那简饶空"
+            "曾毋沙乜养鞠须丰巢关蒯相查后荆红游竺权逯盖益桓公楚慕容欧阳司马夏侯"
+        )
+        _NARRATIVE_VERBS = (
+            "冷笑|怒斥|嘲讽|亮出|拔剑|甩出|跪地|转身|抬手|走入|冲入|盯着|握紧|喝道|冷哼|"
+            "低语|轻笑|拍案|震怒|惨叫|惊恐|后退|大笑|微笑|落泪|反击|出手|下令|质问|怒吼|起身"
+        )
+        _NON_NAME_WORDS = {
+            "雨夜", "寿宴", "豪门", "天台", "大堂", "众人", "全场", "门外", "此刻", "下一",
+            "忽然", "突然", "当场", "瞬间", "原来", "其实", "竟然", "终于", "已经", "所有",
+            "十万", "百亿", "黑金", "龙王", "保镖", "战神", "神将", "废物", "退婚", "冷眼",
+        }
+        full_plain_text = "\n".join(lines)
+        for m_act in re.finditer(
+            rf"(?<![\u4e00-\u9fa5])([{_COMMON_SURNAMES}][\u4e00-\u9fa5]{{1,2}})(?=(?:{_NARRATIVE_VERBS}|是|被|将|把|一|不|却|猛|冷))",
+            full_plain_text,
+        ):
+            nm = m_act.group(1).strip()
+            if nm and nm not in _NON_NAME_WORDS and nm not in narrative_action_names:
+                narrative_action_names.append(nm)
+        for role_kw in ("未婚妻", "岳母", "刀疤男", "大小姐", "女总裁", "恶少", "反派"):
+            if role_kw in full_plain_text and role_kw not in narrative_action_names:
+                narrative_action_names.append(role_kw)
+
+        for nm in narrative_action_names:
+            is_fem = any(w in nm for w in "女妹妻小姐姐母琴雪涵妃婉瑶虞梨娇儿娘姑娘")
+            if is_fem and not main_female:
+                main_female = nm
+            elif not is_fem and not main_male:
+                main_male = nm
         speech_verbs = [
             "冷哼了一整声", "笑了一声", "吸了吸鼻子", "冷哼了一声", "自报家门", "率先行礼",
             "咬牙切齿地", "漫不经心地", "平静地", "缓缓地", "冷冷地", "倔强地",
@@ -888,7 +943,12 @@ class DirectorAgent:
                         dialogue = _clean_dialogue_text(colon_match.group(2))
                         action_beat = f"{speaker}神情肃穆，直视前方说出此话。"
                     else:
-                        speaker = "旁白"
+                        matched_actor = ""
+                        for nm in narrative_action_names:
+                            if nm in line:
+                                matched_actor = nm
+                                break
+                        speaker = matched_actor or "旁白"
                         if len(line.strip()) >= 5 and not _is_sfx_or_onomatopoeia(line):
                             dialogue = _clean_dialogue_text(line)
                             action_beat = f"镜头展现{line.strip()}，营造深刻剧情氛围。"
@@ -1206,28 +1266,10 @@ class DirectorAgent:
 
         user_prompt = f"短剧标题: {title}\n题材: {genre}\n小说原文:\n{raw_text}"
 
-        # 0. 优先尝试 Google Colab T4 1号机 (Qwen3.8-27B-Uncensored 4-bit GGUF 免费无限制总导演)
-        try:
-            try:
-                from providers.colab_cluster_provider import ColabClusterManager
-            except ImportError:
-                from omnidrama.providers.colab_cluster_provider import ColabClusterManager
-            cluster = ColabClusterManager.get_instance()
-            content_str, engine_name = cluster.run_qwen_uncensored_director(
-                DIRECTOR_SYSTEM_PROMPT,
-                user_prompt,
-                allow_cold_boot=allow_colab_cold_boot,
-                timeout_sec=55,
-            )
-            parsed = self._normalize_llm_project_dict(self._extract_json(content_str), title, genre)
-            proj = DramaProject.model_validate(parsed)
-            proj = self._post_process_project(proj, title, genre)
-            self.last_used_engine = engine_name
-            return proj
-        except Exception as colab_err:
-            print(f"[DirectorAgent] Colab T4 Qwen3.8-27B 路由提示: {colab_err}")
+        # 优先使用已配置 Key 的高速稳定云端大模型（2~6秒出专业多镜剧本），
+        # 仅在未配置任何云端 API Key 或全部云端调用失败时，再回退尝试 Colab T4，避免用户干等 55 秒冷启动！
 
-        # 1. 优先尝试硅基流动 SiliconFlow (国内免绑卡，含免费 Qwen2.5 与 DeepSeek-V3)
+        # 1. 尝试硅基流动 SiliconFlow (国内免绑卡，含免费 Qwen2.5 与 DeepSeek-V3)
         if siliconflow_key:
             try:
                 try:
@@ -1259,7 +1301,7 @@ class DirectorAgent:
                     "response_format": {"type": "json_object"},
                     "temperature": 0.7
                 }
-                resp = requests.post(url, headers=headers, json=payload, timeout=45)
+                resp = requests.post(url, headers=headers, json=payload, timeout=30)
                 if resp.status_code == 200:
                     data = resp.json()
                     content_str = data["choices"][0]["message"]["content"]
@@ -1284,7 +1326,7 @@ class DirectorAgent:
                     ],
                     "temperature": 0.7
                 }
-                resp = requests.post(url, headers=headers, json=payload, timeout=45)
+                resp = requests.post(url, headers=headers, json=payload, timeout=30)
                 if resp.status_code == 200:
                     data = resp.json()
                     content_str = data["choices"][0]["message"]["content"]
@@ -1311,7 +1353,7 @@ class DirectorAgent:
                     "system": DIRECTOR_SYSTEM_PROMPT,
                     "messages": [{"role": "user", "content": user_prompt}]
                 }
-                resp = requests.post(url, headers=headers, json=payload, timeout=45)
+                resp = requests.post(url, headers=headers, json=payload, timeout=30)
                 if resp.status_code == 200:
                     data = resp.json()
                     content_str = data["content"][0]["text"]
@@ -1323,28 +1365,53 @@ class DirectorAgent:
             except Exception as e:
                 print(f"[DirectorAgent] Claude 调用异常: {e}")
 
-        # 5. 尝试 Google Gemini API
+        # 5. 尝试 Google Gemini API（多代模型自动平滑回退，避免单一模型 404/限流导致降级）
         if gemini_key:
-            try:
-                url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={gemini_key}"
-                payload = {
-                    "systemInstruction": {"parts": [{"text": DIRECTOR_SYSTEM_PROMPT}]},
-                    "contents": [{"parts": [{"text": user_prompt}]}],
-                    "generationConfig": {"responseMimeType": "application/json", "temperature": 0.7}
-                }
-                resp = requests.post(url, json=payload, timeout=45)
-                if resp.status_code == 200:
-                    data = resp.json()
-                    content_str = data["candidates"][0]["content"]["parts"][0]["text"]
-                    parsed = self._normalize_llm_project_dict(self._extract_json(content_str), title, genre)
-                    proj = DramaProject.model_validate(parsed)
-                    proj = self._post_process_project(proj, title, genre)
-                    self.last_used_engine = "Google Gemini 2.5 Flash"
-                    return proj
-            except Exception as e:
-                print(f"[DirectorAgent] Gemini 调用异常: {e}")
+            for g_model in ("gemini-2.5-flash", "gemini-2.0-flash", "gemini-flash-latest"):
+                try:
+                    url = f"https://generativelanguage.googleapis.com/v1beta/models/{g_model}:generateContent?key={gemini_key}"
+                    payload = {
+                        "systemInstruction": {"parts": [{"text": DIRECTOR_SYSTEM_PROMPT}]},
+                        "contents": [{"parts": [{"text": user_prompt}]}],
+                        "generationConfig": {"responseMimeType": "application/json", "temperature": 0.7}
+                    }
+                    resp = requests.post(url, json=payload, timeout=30)
+                    if resp.status_code == 200:
+                        data = resp.json()
+                        content_str = data["candidates"][0]["content"]["parts"][0]["text"]
+                        parsed = self._normalize_llm_project_dict(self._extract_json(content_str), title, genre)
+                        proj = DramaProject.model_validate(parsed)
+                        proj = self._post_process_project(proj, title, genre)
+                        self.last_used_engine = f"Google Gemini ({g_model})"
+                        return proj
+                    else:
+                        print(f"[DirectorAgent] Gemini ({g_model}) 返回 HTTP {resp.status_code}: {resp.text[:160]}")
+                except Exception as e:
+                    print(f"[DirectorAgent] Gemini ({g_model}) 调用异常: {e}")
 
-        # 6. 兜底本地工业级规则拆解
+        # 6. 备选尝试 Google Colab T4 1号机 (仅在云端 API 不可用且允许冷启动时短超时尝试)
+        if allow_colab_cold_boot:
+            try:
+                try:
+                    from providers.colab_cluster_provider import ColabClusterManager
+                except ImportError:
+                    from omnidrama.providers.colab_cluster_provider import ColabClusterManager
+                cluster = ColabClusterManager.get_instance()
+                content_str, engine_name = cluster.run_qwen_uncensored_director(
+                    DIRECTOR_SYSTEM_PROMPT,
+                    user_prompt,
+                    allow_cold_boot=False,
+                    timeout_sec=20,
+                )
+                parsed = self._normalize_llm_project_dict(self._extract_json(content_str), title, genre)
+                proj = DramaProject.model_validate(parsed)
+                proj = self._post_process_project(proj, title, genre)
+                self.last_used_engine = engine_name
+                return proj
+            except Exception as colab_err:
+                print(f"[DirectorAgent] Colab T4 Qwen3.8-27B 路由提示: {colab_err}")
+
+        # 7. 兜底本地工业级规则拆解
         return self.breakdown_story_offline(raw_text, title=title, genre=genre)
 
     # 别名兼容：支持剧本拆解调用

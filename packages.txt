@@ -1,3 +1,0 @@
-ffmpeg
-fonts-wqy-zenhei
-fonts-wqy-microhei

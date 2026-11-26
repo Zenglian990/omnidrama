@@ -318,6 +318,55 @@ class ReferenceVideoAnalyzer:
         brief_file.write_text(json.dumps(brief, ensure_ascii=False, indent=2), encoding="utf-8")
         return brief
 
+    def analyze_local_video(
+        self,
+        local_video_path: Path | str,
+        display_name: str = "uploaded_reference.mp4",
+        max_keyframes: int = 8,
+    ) -> Dict[str, Any]:
+        """对用户通过受控上传接口提交的本地参考视频执行真实 FFmpeg 场景切点与 5 维拆解."""
+        video_p = Path(local_video_path).resolve()
+        if not video_p.exists() or not video_p.is_file():
+            raise ValueError("上传的参考视频文件不存在")
+
+        run_dir = self.workspace_dir / f"ref_upload_{uuid.uuid4().hex[:12]}"
+        run_dir.mkdir(parents=True, exist_ok=True)
+
+        meta = self._probe_video(video_p)
+        duration = meta["duration"]
+        scenes = self._detect_scenes_and_keyframes(video_p, run_dir, duration, max_scenes=max_keyframes)
+
+        avg_dur = round(duration / max(1, len(scenes)), 2)
+        cpm = round(60.0 / max(0.5, avg_dur), 1)
+        pacing_style = "fast_intense (高频爽感快切)" if avg_dur <= 3.8 else "cinematic_dramatic (电影叙事推拉)"
+
+        brief = {
+            "version": "1.0",
+            "source": {
+                "input": f"本地上传视频 · {display_name}",
+                "platform": "local_upload",
+                "analyzed_local_file": display_name,
+                "duration_seconds": duration,
+                "resolution": f"{meta['width']}x{meta['height']}",
+                "fps": meta["fps"],
+            },
+            "pacing_profile": {
+                "total_scenes": len(scenes),
+                "avg_shot_duration": avg_dur,
+                "cuts_per_minute": cpm,
+                "pacing_style": pacing_style,
+                "hook_technique": f"实测首镜 {scenes[0]['duration']}s 切点入画 · 平均 {avg_dur}s/镜 ({cpm} 切/分)",
+            },
+            "scenes": scenes,
+            "what_makes_it_work": [
+                f"实测 FFmpeg 场景切换共检测到 {len(scenes)} 个核心镜段，总时长 {duration}s（平均 {avg_dur}s/镜，{cpm} 切/分）",
+                "景别与运镜按原片切点自动映射为特写/中景/震动交替，复刻真实爆款短剧呼吸节奏",
+            ],
+        }
+        brief_file = run_dir / "video_analysis_brief.json"
+        brief_file.write_text(json.dumps(brief, ensure_ascii=False, indent=2), encoding="utf-8")
+        return brief
+
     def adapt_reference_to_novel(
         self,
         brief: Dict[str, Any],
@@ -360,8 +409,11 @@ class ReferenceVideoAnalyzer:
                 "motion_name": motion_name,
                 "dialogue": s.dialogue,
                 "duration": ref_sc.get("duration", 3.5),
-                "image": f"/api/shots/{s.shot_id}/image",
-                "audio": f"/api/shots/{s.shot_id}/audio",
+                "duration_seconds": ref_sc.get("duration", 3.5),
+                "image": "",
+                "audio": "",
+                "has_image": False,
+                "has_audio": False,
                 "sfx": "惊雷轰鸣" if "SHAKE" in motion_str else "环境音效",
                 "visual_prompt": (
                     f"{s.visual_prompt}, reference framing: {five_asp.get('spatial_framing', scale_str)}, "
@@ -370,16 +422,26 @@ class ReferenceVideoAnalyzer:
             })
 
         optimized_shots, before_risk, after_risk, fixes = auto_optimize_storyboard(shots_list, genre=genre)
+        total_est_dur = round(sum(float(x.get("duration") or x.get("duration_seconds") or 3.5) for x in optimized_shots), 2)
         return {
             "title": title,
             "genre": genre,
+            "video_url": "",
+            "live_actor_video": "",
+            "srt_url": "",
+            "duration": total_est_dur,
+            "audio_tracks": [
+                {"track": "爆款节奏仿写引擎", "status": "已对齐", "source": f"1:1 映射 {len(optimized_shots)} 镜节拍"},
+                {"track": "人声对白轨", "status": "待合成", "source": "Edge-TTS / ElevenLabs"},
+                {"track": "电影配乐轨 (BGM)", "status": "待混音", "source": f"{genre}交响配乐"},
+            ],
             "reference_brief": brief,
             "characters": [
                 {
                     "name": c.name,
                     "role": "核心主角" if i == 0 else "主要角色",
                     "voice": "云希 (磁性沉稳霸道)" if c.gender == "male" else "晓晓 (尖酸刻薄/成熟女主)",
-                    "avatar": f"/api/shots/{min(i + 1, max(1, len(optimized_shots)))}/image",
+                    "avatar": "",
                     "traits": c.visual_tags,
                 }
                 for i, c in enumerate(proj.characters)

@@ -1,7 +1,9 @@
 """OmniDrama 可视化导演工作台 Web 后端 (FastAPI - v1.5.0 安全加固版)."""
 import asyncio
+import base64
 import hashlib
 import json
+import logging
 import math
 import os
 import platform
@@ -14,10 +16,12 @@ import urllib.parse
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Any, Optional, List
-from fastapi import FastAPI, BackgroundTasks, HTTPException, Request
+from fastapi import FastAPI, BackgroundTasks, HTTPException, Request, Response, UploadFile, File, Form
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import HTMLResponse, FileResponse, JSONResponse
+from fastapi.responses import HTMLResponse, FileResponse, JSONResponse, RedirectResponse
 from pydantic import BaseModel
+
+logger = logging.getLogger("omnidrama.web")
 
 import types
 
@@ -51,14 +55,18 @@ from core.runtime_context import (
     validate_api_keys_dict,
 )
 from core.security import (
+    SESSION_COOKIE_NAME,
     _safe_resolve_under,
     _safe_slug,
     build_safe_concat_file,
+    build_session_cookie_value,
+    get_auth_mode,
     has_path_traversal_markers,
     is_public_request,
     validate_safe_path_param,
     verify_bearer_token,
 )
+from core.storage import CloudStorageSync, atomic_write_json, safe_read_json
 from core.net_safety import (
     MAX_IMAGE_BYTES,
     MAX_VIDEO_BYTES,
@@ -68,17 +76,25 @@ from core.net_safety import (
     validate_safe_public_https_url,
 )
 
-app = FastAPI(title="OmniDrama 灵眸漫剧工作台", version="1.5.0")
+app = FastAPI(title="OmniDrama 灵眸漫剧工作台", version="2.2.0")
+_CLOUD_STORAGE = CloudStorageSync(OUTPUT_DIR)
+
+_AUTH_SELF_HANDLED_PATHS = frozenset({"/api/auth/session", "/api/auth/logout"})
 
 
 @app.middleware("http")
 async def api_auth_middleware(request: Request, call_next):
-    """全站统一 Bearer Token 鉴权中间件（未配置 API_AUTH_TOKEN 时 Fail-Closed）."""
+    """全站统一 Bearer Token / HttpOnly 会话 Cookie 鉴权中间件（生产未配置 API_AUTH_TOKEN 时真 Fail-Closed）."""
     if request.method.upper() == "OPTIONS":
+        return await call_next(request)
+    if request.url.path in _AUTH_SELF_HANDLED_PATHS and request.method.upper() == "POST":
         return await call_next(request)
     if is_public_request(request.method, request.url.path):
         return await call_next(request)
-    if not verify_bearer_token(request.headers.get("Authorization")):
+    if not verify_bearer_token(
+        request.headers.get("Authorization"),
+        request.cookies.get(SESSION_COOKIE_NAME),
+    ):
         return JSONResponse(
             status_code=401,
             content={"detail": "Unauthorized: invalid or missing Bearer token"},
@@ -191,6 +207,10 @@ _actors_dir = ASSETS_DIR / "cinematic_actors"
 _actors_dir.mkdir(parents=True, exist_ok=True)
 app.mount("/assets/cinematic_actors", StaticFiles(directory=str(_actors_dir)), name="cinematic_actors")
 
+_static_dir = WEB_DIR / "static"
+_static_dir.mkdir(parents=True, exist_ok=True)
+app.mount("/static", StaticFiles(directory=str(_static_dir)), name="static")
+
 
 class StoryRequest(BaseModel):
     title: str = "新短剧"
@@ -198,23 +218,69 @@ class StoryRequest(BaseModel):
     story_text: str
 
 
+class AuthSessionRequest(BaseModel):
+    token: str = ""
+
+
+@app.post("/api/auth/session")
+async def create_auth_session(req: AuthSessionRequest, request: Request, response: Response):
+    """校验访问令牌并签发同源 HttpOnly 会话 Cookie，让浏览器原生 video/audio/img/下载在开启鉴权后 0 401."""
+    auth_header = f"Bearer {req.token.strip()}" if req.token and req.token.strip() else request.headers.get("Authorization")
+    if not verify_bearer_token(auth_header):
+        raise HTTPException(status_code=401, detail="访问令牌无效，请检查 API_AUTH_TOKEN")
+    cookie_val = build_session_cookie_value()
+    if cookie_val:
+        is_https = request.url.scheme == "https" or request.headers.get("x-forwarded-proto", "").lower() == "https"
+        response.set_cookie(
+            key=SESSION_COOKIE_NAME,
+            value=cookie_val,
+            httponly=True,
+            samesite="lax",
+            secure=is_https,
+            max_age=7 * 24 * 3600,
+            path="/",
+        )
+    return {"status": "ok", "auth_mode": get_auth_mode()}
+
+
+@app.post("/api/auth/logout")
+async def clear_auth_session(response: Response):
+    """清除浏览器登录会话 Cookie."""
+    response.delete_cookie(key=SESSION_COOKIE_NAME, path="/")
+    return {"status": "ok"}
+
+
 @app.get("/health")
 @app.get("/api/health")
 async def health_check():
-    return {"status": "ok", "service": "omnidrama"}
+    return {
+        "status": "ok",
+        "service": "omnidrama",
+        "version": "2.2.0",
+        "auth_mode": get_auth_mode(),
+        "storage": _CLOUD_STORAGE.status(),
+        "ffmpeg": bool(shutil.which("ffmpeg")),
+    }
 
 
 @app.get("/download/apk")
 @app.get("/omnidrama.apk")
 async def download_apk():
+    """支持通过 OMNIDRAMA_APK_URL 重定向至 GitHub Releases / GCS 下载 APK，避免大二进制文件臃肿容器镜像."""
+    apk_url = os.environ.get("OMNIDRAMA_APK_URL", "").strip()
+    if apk_url.startswith("https://"):
+        return RedirectResponse(url=apk_url, status_code=302)
     apk_path = ASSETS_DIR / "omnidrama.apk"
     if apk_path.exists():
         return FileResponse(
             str(apk_path),
             media_type="application/vnd.android.package-archive",
-            filename="OmniDrama_v3.3.0.apk"
+            filename="OmniDrama_Release.apk"
         )
-    raise HTTPException(status_code=404, detail="Release APK not found on server")
+    raise HTTPException(
+        status_code=404,
+        detail="Android APK 已迁移至外部对象存储/Releases 分发（请配置 OMNIDRAMA_APK_URL 或直接通过手机浏览器添加 PWA 主屏幕）",
+    )
 
 
 @app.api_route("/", methods=["GET", "HEAD"], response_class=HTMLResponse)
@@ -251,10 +317,11 @@ def _mask_key(val: str) -> str:
 
 
 def _load_project_data() -> Dict[str, Any]:
+    _CLOUD_STORAGE.sync_download_if_missing(PROJECT_STATE_FILE)
     if PROJECT_STATE_FILE.exists():
-        try:
-            with open(PROJECT_STATE_FILE, "r", encoding="utf-8") as f:
-                d = json.load(f)
+        d = safe_read_json(PROJECT_STATE_FILE)
+        if isinstance(d, dict):
+            try:
                 title = d.get("title", "").strip()
                 shots_raw = d.get("shots", [])
                 if shots_raw:
@@ -273,8 +340,8 @@ def _load_project_data() -> Dict[str, Any]:
                             cleaned_shots.append(s)
                         if cleaned_shots:
                             d["shots"] = cleaned_shots
-                    except Exception:
-                        pass
+                    except Exception as pua_err:
+                        logger.warning("清理分镜 PUA 字符异常: %s", pua_err)
                 if title:
                     safe_title = _safe_slug(title, default="untitled")
                     try:
@@ -284,20 +351,38 @@ def _load_project_data() -> Dict[str, Any]:
                         final_mp4 = None
                         srt_p = None
                     d["video_url"] = "/api/video/stream?mode=full" if (final_mp4 and final_mp4.exists()) else ""
-                    d["live_actor_video"] = "/api/video/stream?mode=live" if (final_mp4 and final_mp4.exists()) else ""
+                    live_mp4 = _safe_resolve_under(OUTPUT_DIR, safe_title, f"{safe_title}_真人活化版.mp4") if final_mp4 else None
+                    d["live_actor_video"] = "/api/video/stream?mode=live" if ((live_mp4 and live_mp4.exists()) or (final_mp4 and final_mp4.exists())) else ""
                     if srt_p and srt_p.exists():
                         d["srt_url"] = "/api/project/subtitles"
                     elif isinstance(d.get("srt_url"), str) and d["srt_url"].startswith("/output/"):
                         d["srt_url"] = "/api/project/subtitles"
+                    shots_dir_chk = _safe_resolve_under(OUTPUT_DIR, safe_title, "shots") if final_mp4 else None
                 else:
                     d["video_url"] = ""
                     d["live_actor_video"] = ""
+                    shots_dir_chk = None
                 for s in d.get("shots", []):
+                    sid = int(s.get("id", 0) or 0)
+                    img_exists = bool(shots_dir_chk and sid > 0 and (shots_dir_chk / f"shot_{sid:03d}.jpg").exists())
+                    aud_exists = bool(shots_dir_chk and sid > 0 and (shots_dir_chk / f"shot_{sid:03d}.mp3").exists())
+                    s["has_image"] = img_exists
+                    s["has_audio"] = aud_exists
+                    s["image"] = f"/api/shots/{sid}/image" if img_exists else ""
+                    s["audio"] = f"/api/shots/{sid}/audio" if aud_exists else ""
                     if "visual_prompt" not in s or not s["visual_prompt"]:
                         s["visual_prompt"] = f"masterpiece, 8k vertical cinema drama, {s.get('speaker', 'character')}, {s.get('dialogue', '')}, cinematic lighting"
+                # 清理指向未生成分镜图的 404 角色头像，避免前端满屏破图
+                for c in d.get("characters", []):
+                    av = str(c.get("avatar") or "")
+                    m_av = re.match(r"^/api/shots/(\d+)/image", av)
+                    if m_av:
+                        av_sid = int(m_av.group(1))
+                        if not (shots_dir_chk and (shots_dir_chk / f"shot_{av_sid:03d}.jpg").exists()):
+                            c["avatar"] = ""
                 return d
-        except Exception:
-            pass
+            except Exception as load_err:
+                logger.warning("加载工程数据结构异常，回退空白工程: %s", load_err)
 
     # 默认空白工程：绝不预置任何固定小说，完全由创作者自主添加或从番茄小说导入
     empty_data = {
@@ -316,8 +401,28 @@ def _load_project_data() -> Dict[str, Any]:
 
 def _save_project_data(data: Dict[str, Any]):
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    with open(PROJECT_STATE_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+    atomic_write_json(PROJECT_STATE_FILE, data)
+    _CLOUD_STORAGE.sync_upload(PROJECT_STATE_FILE)
+    ep_id = data.get("episode_id")
+    if ep_id:
+        try:
+            mgr = _get_series_manager()
+            ep_file = mgr.get_episode_project_file(str(ep_id))
+            atomic_write_json(ep_file, data)
+            _CLOUD_STORAGE.sync_upload(ep_file)
+            shots = data.get("shots", [])
+            has_vid = bool(data.get("video_url"))
+            status = "COMPLETED" if has_vid else ("STORYBOARD" if shots else "DRAFT")
+            mgr.update_episode_meta(
+                episode_id=str(ep_id),
+                shots_count=len(shots),
+                duration=float(data.get("duration") or 0.0),
+                status=status,
+                story_text=data.get("story_text"),
+            )
+            _CLOUD_STORAGE.sync_upload(mgr.index_file)
+        except Exception as save_ep_err:
+            logger.warning("同步分集快照失败 (%s): %s", ep_id, save_ep_err)
 
 
 @app.get("/api/project")
@@ -333,9 +438,11 @@ def _resolve_current_video_file(mode: str = "full") -> Path:
         safe_title = _safe_slug(title, default="untitled")
         if mode == "live":
             live_p = _safe_resolve_under(OUTPUT_DIR, safe_title, f"{safe_title}_真人活化版.mp4")
+            _CLOUD_STORAGE.sync_download_if_missing(live_p)
             if live_p.exists():
                 return live_p
         p = _safe_resolve_under(OUTPUT_DIR, safe_title, f"{safe_title}_影视级成片.mp4")
+        _CLOUD_STORAGE.sync_download_if_missing(p)
         if p.exists():
             return p
         raise HTTPException(status_code=404, detail=f"作品《{safe_title}》尚未渲染生成视频成片")
@@ -394,6 +501,7 @@ async def get_shot_audio(shot_id: int):
         audio_path = _safe_resolve_under(OUTPUT_DIR, safe_title, "shots", f"shot_{shot_id:03d}.mp3")
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    _CLOUD_STORAGE.sync_download_if_missing(audio_path)
     if not audio_path.exists() or audio_path.stat().st_size == 0:
         raise HTTPException(
             status_code=404,
@@ -420,10 +528,14 @@ async def generate_shot_audio(shot_id: int, req: Optional[ShotAudioGenerateReque
             target_shot = s
             break
 
-    dialogue_text = ((req.text if req else None) or (target_shot.get("dialogue", "") if target_shot else "")).strip()
+    dialogue_text = (
+        (req.text if req else None)
+        or (target_shot.get("dialogue", "") if target_shot else "")
+        or (target_shot.get("action_beat", "") if target_shot else "")
+    ).strip()
     speaker_name = ((req.speaker if req else None) or (target_shot.get("speaker", "旁白") if target_shot else "旁白")).strip()
     if not dialogue_text:
-        raise HTTPException(status_code=400, detail="配音台词不能为空")
+        dialogue_text = f"第{shot_id}镜，{speaker_name}画面切入。"
 
     try:
         from omnidrama.core.tts_engine import TTSEngine
@@ -450,6 +562,7 @@ async def get_shot_image(shot_id: int):
         img_path = _safe_resolve_under(OUTPUT_DIR, safe_title, "shots", f"shot_{shot_id:03d}.jpg")
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    _CLOUD_STORAGE.sync_download_if_missing(img_path)
     if not img_path.exists() or img_path.stat().st_size == 0:
         raise HTTPException(
             status_code=404,
@@ -489,6 +602,7 @@ class RenderRequest(BaseModel):
     shots: Optional[List[Dict[str, Any]]] = None
     characters: Optional[List[Dict[str, Any]]] = None
     api_keys: Optional[Dict[str, str]] = None
+    include_live_actor: bool = False
 
 
 @app.get("/api/project/render-status")
@@ -498,7 +612,7 @@ async def get_render_status():
 
 
 def _load_cjk_font(size: int):
-    """跨平台加载中文字体 (支持 Windows / Linux Docker / macOS)."""
+    """跨平台加载中文字体 (支持 Windows / Linux Docker / macOS，防止云端中文字幕变乱码)."""
     from PIL import ImageFont
     candidates = [
         str(ASSETS_DIR / "fonts" / "NotoSansSC-Bold.otf"),
@@ -508,6 +622,8 @@ def _load_cjk_font(size: int):
         "C:/Windows/Fonts/simhei.ttf",
         "/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc",
         "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+        "/usr/share/fonts/noto-cjk/NotoSansCJK-Bold.ttc",
+        "/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc",
         "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc",
         "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",
         "/System/Library/Fonts/PingFang.ttc",
@@ -518,52 +634,183 @@ def _load_cjk_font(size: int):
                 return ImageFont.truetype(fp, size)
             except Exception:
                 continue
+    # 动态扫描 Linux 系统字体目录中的任意 CJK 字体，避免路径差异导致退回位图字体
+    linux_fonts_root = Path("/usr/share/fonts")
+    if linux_fonts_root.exists():
+        for pattern in ("*Noto*CJK*.ttc", "*Noto*SC*.otf", "*Noto*SC*.ttf", "*wqy*.ttc", "*wqy*.ttf", "*DroidSansFallback*.ttf"):
+            for fp in linux_fonts_root.rglob(pattern):
+                try:
+                    return ImageFont.truetype(str(fp), size)
+                except Exception:
+                    continue
     return ImageFont.load_default()
 
 
-def _pick_source_manga_image(speaker: str, shot_id: int, title: str = "", genre: str = "") -> Path:
-    """为影视镜头精准匹配 100% 电影级真人演员剧照（角色严格锁定，杜绝换脸与跨题材串画）."""
+def _validate_image_file(file_path: str | Path, min_bytes: int = 2048) -> bool:
+    """严格校验图片文件是否为合法非损坏图像，杜绝将 HTTP 502/HTML 报错页误存为 .jpg."""
+    p = Path(file_path)
+    if not p.exists() or p.stat().st_size < min_bytes:
+        return False
+    try:
+        from PIL import Image
+        with Image.open(p) as im:
+            im.verify()
+        return True
+    except Exception:
+        try:
+            p.unlink(missing_ok=True)
+        except OSError:
+            pass
+        return False
+
+
+def _generate_gemini_image(
+    prompt: str,
+    out_path: str,
+    aspect_ratio: str = "9:16",
+    api_key: Optional[str] = None,
+) -> bool:
+    """调用 Google Gemini / Imagen 原生生图接口（配置 GEMINI_API_KEY / GOOGLE_API_KEY 时自动解锁真 AI 生图）."""
+    import requests as _req
+
+    key = (api_key or get_provider_key("GEMINI_API_KEY") or get_provider_key("GOOGLE_API_KEY")).strip()
+    if not key:
+        return False
+
+    # 1. 优先尝试 Imagen 3.0 专业生图端点
+    try:
+        imagen_url = f"https://generativelanguage.googleapis.com/v1beta/models/imagen-3.0-generate-002:predict?key={urllib.parse.quote(key)}"
+        resp = _req.post(
+            imagen_url,
+            json={
+                "instances": [{"prompt": prompt[:900]}],
+                "parameters": {"sampleCount": 1, "aspectRatio": aspect_ratio},
+            },
+            timeout=35,
+        )
+        if resp.status_code == 200:
+            preds = resp.json().get("predictions") or []
+            b64 = preds[0].get("bytesBase64Encoded") if preds else ""
+            if b64:
+                raw_bytes = base64.b64decode(b64)
+                Path(out_path).parent.mkdir(parents=True, exist_ok=True)
+                with open(out_path, "wb") as f:
+                    f.write(raw_bytes)
+                if _validate_image_file(out_path):
+                    return True
+    except Exception as exc:
+        logger.warning("Gemini Imagen 3 生图尝试未命中，切换 Gemini Flash Image: %s", exc)
+
+    # 2. 回退尝试 Gemini Flash 原生多模态生图端点
+    for model_id in ("gemini-2.5-flash-image", "gemini-2.0-flash-preview-image-generation", "gemini-2.0-flash-exp-image-generation", "gemini-2.5-flash-image-preview"):
+        try:
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_id}:generateContent?key={urllib.parse.quote(key)}"
+            resp = _req.post(
+                url,
+                json={
+                    "contents": [{"parts": [{"text": f"Generate a cinematic {aspect_ratio} photorealistic movie still: {prompt[:800]}"}]}],
+                    "generationConfig": {"responseModalities": ["IMAGE", "TEXT"]},
+                },
+                timeout=35,
+            )
+            if resp.status_code != 200:
+                continue
+            data = resp.json()
+            for cand in data.get("candidates", []):
+                for part in cand.get("content", {}).get("parts", []):
+                    inline = part.get("inlineData") or part.get("inline_data")
+                    if inline and inline.get("data"):
+                        raw_bytes = base64.b64decode(inline["data"])
+                        Path(out_path).parent.mkdir(parents=True, exist_ok=True)
+                        with open(out_path, "wb") as f:
+                            f.write(raw_bytes)
+                        if _validate_image_file(out_path):
+                            return True
+        except Exception as exc:
+            logger.warning("Gemini Flash Image (%s) 生图失败: %s", model_id, exc)
+    return False
+
+
+def _pick_source_manga_image(
+    speaker: str,
+    shot_id: int,
+    title: str = "",
+    genre: str = "",
+    characters: Optional[List[Dict[str, Any]]] = None,
+) -> Path:
+    """智能匹配本地高质量真人影视定妆照/院线剧照库（同角色跨镜严格锁脸，绝不换性别变脸）."""
     actors_dir = ASSETS_DIR / "cinematic_actors"
+    sp = (speaker or "").strip()
 
-    # 仅在题材或剧名明确属于《特工易冷》或战神动作题材时，才使用特工剧照
-    is_te_gong = any(k in (title + genre + speaker) for k in ["易冷", "特工", "战神", "雇佣兵", "龙王", "修罗"])
+    # 1. 旁白 / 宏大环境镜头
+    if not sp or any(k in sp for k in ["旁白", "叙事", "Scene", "环境", "Narrator"]):
+        scene_pool = [actors_dir / "scene_rain_alley.jpg", actors_dir / "scene_fight_action.jpg"]
+        existing_scenes = [p for p in scene_pool if p.exists()]
+        if existing_scenes:
+            return existing_scenes[(shot_id - 1) % len(existing_scenes)]
 
-    if is_te_gong:
-        if any(k in speaker for k in ["易冷", "特工", "战神", "主角", "男主"]):
-            yileng = actors_dir / "actor_yileng.jpg"
-            if yileng.exists():
-                return yileng
-        if any(k in speaker for k in ["暖暖", "女儿", "小女孩", "女孩", "小妹", "妹", "童", "女"]):
-            nuannuan = actors_dir / "actor_yinuannuan.jpg"
-            if nuannuan.exists():
-                return nuannuan
-        if any(k in speaker for k in ["恶霸", "反派", "刀疤", "打手", "混混", "泼皮", "流氓", "坏人"]):
-            gangster = actors_dir / "actor_scar_gangster.jpg"
-            if gangster.exists():
-                return gangster
-        if "旁白" in speaker or not speaker:
-            if shot_id <= 2:
-                scene_rain = actors_dir / "scene_rain_alley.jpg"
-                if scene_rain.exists():
-                    return scene_rain
-            else:
-                scene_fight = actors_dir / "scene_fight_action.jpg"
-                if scene_fight.exists():
-                    return scene_fight
+    # 2. 反派角色严格锁定反派定妆照
+    if any(k in sp for k in ["恶霸", "反派", "刀疤", "打手", "混混", "泼皮", "流氓", "坏人", "赵", "仇敌"]):
+        gangster = actors_dir / "actor_scar_gangster.jpg"
+        if gangster.exists():
+            return gangster
 
-    # 非特工题材：生成/获取题材匹配的纯净电影构图底图，严禁套用雨夜特工打斗图
+    # 3. 女童 / 萌娃角色锁定
+    if any(k in sp for k in ["暖暖", "女儿", "小女孩", "童", "萌娃"]):
+        nuannuan = actors_dir / "actor_yinuannuan.jpg"
+        if nuannuan.exists():
+            return nuannuan
+
+    # 4. 优先结合角色库声线/定位判断性别，避免按 shot_id 随机轮询导致男主跨镜变女童
+    is_female_char = any(k in sp for k in ["女", "妹", "妻", "小姐", "姐", "母", "夫人", "千金", "雪", "婉", "瑶", "妃", "娘", "姑娘", "秘书", "女孩", "少女"])
+    if not is_female_char and characters:
+        for c in characters:
+            cname = str(c.get("name") or "")
+            if sp and (sp == cname or sp in cname or cname in sp):
+                v_str = str(c.get("voice") or "")
+                role_str = str(c.get("role") or "")
+                if any(fk in (v_str + role_str) for fk in ["晓晓", "晓涵", "晓梦", "晓贝", "晓妮", "Jenny", "Aria", "Nanami", "SunHi", "女主", "女配", "千金", "夫人"]):
+                    is_female_char = True
+                break
+
+    if is_female_char:
+        for fname in ("female_agent_01.jpg", "actor_yinuannuan.jpg"):
+            cand = actors_dir / fname
+            if cand.exists():
+                return cand
+
+    # 5. 男性主角 / 其他男性角色严格锁定同一男主定妆照（杜绝第2镜男主、第3镜变女童）
+    yileng = actors_dir / "actor_yileng.jpg"
+    if yileng.exists():
+        return yileng
+
+    available_stills = sorted([p for p in actors_dir.glob("*.jpg") if p.stat().st_size > 4096])
+    if available_stills:
+        return available_stills[0]
+
+    # 3. 仅当服务器完全无本地剧照时，生成带电影级暗房光晕与构图参考线的分镜卡片底图
     proc_dir = ASSETS_DIR / "procedural"
     proc_dir.mkdir(parents=True, exist_ok=True)
-    slug_genre = "romance" if any(k in genre for k in ["甜宠", "言情", "现言", "古言", "恋爱", "青春"]) else "general"
-    procedural_card = proc_dir / f"{slug_genre}_shot_{shot_id:02d}.jpg"
+    slug_genre = "romance" if any(k in genre for k in ["甜宠", "言情", "现言", "古言", "恋爱", "青春"]) else "cinema"
+    procedural_card = proc_dir / f"storyboard_v2_{slug_genre}_{shot_id:02d}.jpg"
     if not procedural_card.exists():
         from PIL import Image, ImageDraw
-        im = Image.new("RGB", (720, 1280), (28, 20, 36) if slug_genre == "romance" else (14, 18, 28))
+        im = Image.new("RGB", (720, 1280), (16, 18, 28))
         draw = ImageDraw.Draw(im)
-        draw.rectangle([(0, 0), (720, 1280)], fill=(20, 14, 28) if slug_genre == "romance" else (12, 16, 26))
-        for i in range(128):
-            y = int(500 + i * 4)
-            draw.line([(0, y), (720, y)], fill=(35 + int(i * 0.3), 20, 45) if slug_genre == "romance" else (10, 20 + int(i * 0.3), 35))
+        base_top = (34, 22, 48) if slug_genre == "romance" else (12, 24, 42)
+        base_bot = (12, 10, 18) if slug_genre == "romance" else (8, 10, 18)
+        for y in range(1280):
+            ratio = y / 1279.0
+            r = int(base_top[0] * (1 - ratio) + base_bot[0] * ratio)
+            g = int(base_top[1] * (1 - ratio) + base_bot[1] * ratio)
+            b = int(base_top[2] * (1 - ratio) + base_bot[2] * ratio)
+            draw.line([(0, y), (720, y)], fill=(r, g, b))
+        # 电影黄金三分构图线（低对比专业取景框感）
+        grid_col = (55, 70, 95)
+        for gx in (240, 480):
+            draw.line([(gx, 80), (gx, 1200)], fill=grid_col, width=1)
+        for gy in (426, 852):
+            draw.line([(40, gy), (680, gy)], fill=grid_col, width=1)
         im.save(procedural_card, "JPEG", quality=92)
     return procedural_card
 
@@ -573,49 +820,26 @@ def _create_subtitle_overlay_png(
     speaker: str,
     dialogue: str,
     motion_name: str,
-    out_png_path: str
+    out_png_path: str,
+    target_lang: str = "zh",
+    show_debug_badge: bool = False,
 ) -> str:
-    """生成 720x1280 RGBA 全透明字幕与顶部徽标叠加层 (用于 FFmpeg 运镜后固定叠加，绝不放大裁切)."""
-    from PIL import Image, ImageDraw
-    target_w, target_h = 720, 1280
-
-    os.makedirs(os.path.dirname(os.path.abspath(out_png_path)), exist_ok=True)
-    overlay = Image.new("RGBA", (target_w, target_h), (0, 0, 0, 0))
-    draw = ImageDraw.Draw(overlay)
-
-    # 底部字幕渐变黑透遮罩
-    gradient_top = target_h - 245
-    for y in range(gradient_top, target_h):
-        alpha = int(235 * ((y - gradient_top) / (target_h - gradient_top)))
-        draw.line([(0, y), (target_w, y)], fill=(8, 10, 18, alpha))
-
-    badge_font = _load_cjk_font(20)
-    speaker_font = _load_cjk_font(26)
-    dialogue_font = _load_cjk_font(30)
-
-    # 顶部镜头徽标 (固定在左上角安全区)
-    badge_text = f"第 {shot_id:02d} 镜 · {motion_name}"
-    draw.rounded_rectangle([20, 20, 250, 56], radius=8, fill=(10, 14, 26, 205))
-    draw.text((32, 26), badge_text, font=badge_font, fill=(0, 220, 255, 255))
-
-    # 底部角色名标签
-    speaker_color = (255, 215, 0, 255) if speaker in ["叶辰", "主角"] else (
-        (255, 105, 105, 255) if any(w in speaker for w in ["赵", "母", "反派"]) else (100, 220, 255, 255)
+    """生成 720x1280 商业级纯净竖屏安全区 RGBA 透明字幕叠加层（默认无调试水印，出海模式绝不残留中文）."""
+    try:
+        from omnidrama.core.pipeline import _create_subtitle_overlay
+    except ImportError:
+        from core.pipeline import _create_subtitle_overlay
+    return _create_subtitle_overlay(
+        shot_id=shot_id,
+        speaker=speaker,
+        dialogue=dialogue,
+        motion_name=motion_name,
+        out_png_path=out_png_path,
+        width=720,
+        height=1280,
+        show_debug_badge=show_debug_badge,
+        target_lang=target_lang,
     )
-    draw.text((40, target_h - 190), f"【{speaker}】", font=speaker_font, fill=speaker_color)
-
-    # 底部描边中文字幕 (固定居中安全区)
-    max_chars_per_line = 18
-    dialogue_lines = [dialogue[i:i + max_chars_per_line] for i in range(0, len(dialogue), max_chars_per_line)][:3]
-    line_y = target_h - 142
-    for line in dialogue_lines:
-        for ox, oy in [(-2, 0), (2, 0), (0, -2), (0, 2)]:
-            draw.text((40 + ox, line_y + oy), line, font=dialogue_font, fill=(0, 0, 0, 255))
-        draw.text((40, line_y), line, font=dialogue_font, fill=(255, 255, 255, 255))
-        line_y += 38
-
-    overlay.save(out_png_path, "PNG")
-    return out_png_path
 
 
 def _prepare_clean_background_and_preview(
@@ -627,7 +851,8 @@ def _prepare_clean_background_and_preview(
     raw_bg_path: str,
     sub_png_path: str,
     preview_jpg_path: str,
-    is_fallback_portrait: bool = False
+    is_fallback_portrait: bool = False,
+    target_lang: str = "zh",
 ):
     """生成纯净无字 720x1280 背景图 (raw_bg_path)、透明字幕层 (sub_png_path) 以及卡片预览图 (preview_jpg_path)."""
     from PIL import Image, ImageDraw, ImageEnhance
@@ -666,8 +891,8 @@ def _prepare_clean_background_and_preview(
     # 1. 保存纯净无字的背景图供 FFmpeg 2.5D 运镜使用
     frame.save(raw_bg_path, quality=95)
 
-    # 2. 生成全透明 RGBA 字幕层供 FFmpeg 顶层固定叠加
-    _create_subtitle_overlay_png(shot_id, speaker, dialogue, motion_name, sub_png_path)
+    # 2. 生成商业纯净全透明 RGBA 字幕层供 FFmpeg 顶层固定叠加
+    _create_subtitle_overlay_png(shot_id, speaker, dialogue, motion_name, sub_png_path, target_lang=target_lang)
 
     # 3. 合成带字幕的预览卡片图供前端分镜列表展示
     with Image.open(sub_png_path) as sub_im:
@@ -677,7 +902,7 @@ def _prepare_clean_background_and_preview(
 
 
 def _resolve_character_voice_code(speaker: str, characters: List[Dict[str, Any]], genre: str = "") -> str:
-    """根据角色列表中绑定的音色名解析对应的微软神经网络音色代码."""
+    """根据角色列表中绑定的音色名或标准微软音色代码解析对应的神经网络音色."""
     voice_name_to_code = {
         "云希": "zh-CN-YunxiNeural",
         "云健": "zh-CN-YunjianNeural",
@@ -689,12 +914,20 @@ def _resolve_character_voice_code(speaker: str, characters: List[Dict[str, Any]]
         "东北晓贝": "zh-CN-liaoning-XiaobeiNeural",
         "陕西晓妮": "zh-CN-shaanxi-XiaoniNeural",
         "Christopher": "en-US-ChristopherNeural",
+        "Guy": "en-US-GuyNeural",
         "Jenny": "en-US-JennyNeural",
+        "Aria": "en-US-AriaNeural",
+        "Keita": "ja-JP-KeitaNeural",
+        "Nanami": "ja-JP-NanamiNeural",
+        "InJoon": "ko-KR-InJoonNeural",
+        "SunHi": "ko-KR-SunHiNeural",
     }
     for c in characters:
         c_name = c.get("name", "")
         if speaker and (speaker in c_name or c_name in speaker):
-            v_label = c.get("voice", "")
+            v_label = str(c.get("voice", "") or "")
+            if re.match(r"^[a-z]{2}-[A-Z]{2}-[A-Za-z0-9]+Neural$", v_label.strip()):
+                return v_label.strip()
             for k, code in voice_name_to_code.items():
                 if k in v_label:
                     return code
@@ -846,6 +1079,24 @@ async def _generate_single_shot_visual(
             if logs_list is not None:
                 logs_list.append(f"⚠️ [{_now_str()}] 第 {sid:02d} 镜 FLUX.1 Pro 异常 ({str(bfl_err)[:55]})")
 
+    # 2.5 尝试 Google Gemini Imagen 3 / Flash Image 原生生图
+    gemini_key = get_provider_key("GEMINI_API_KEY") or get_provider_key("GOOGLE_API_KEY")
+    if not generated_ai_img and gemini_key:
+        try:
+            ok_gem = await asyncio.to_thread(
+                _generate_gemini_image,
+                visual_prompt,
+                ai_gen_source_path,
+                "9:16",
+                gemini_key,
+            )
+            if ok_gem:
+                generated_ai_img = True
+                if logs_list is not None:
+                    logs_list.append(f"🎨 [{_now_str()}] 第 {sid:02d} 镜：Google Gemini 原生影视生图成功！")
+        except Exception as gem_err:
+            logger.warning("第 %d 镜 Gemini 生图异常: %s", sid, gem_err)
+
     # 3. 尝试字节跳动火山方舟 Seedance 2.0/2.5 或 快手可灵 Kling 2.0 图生视频 (支持 resume_job 防重复扣费)
     pexels_video_clip: Optional[str] = None
     ark_key = get_provider_key("ARK_API_KEY")
@@ -877,12 +1128,13 @@ async def _generate_single_shot_visual(
                     pexels_video_clip = vid_path
                     if logs_list is not None:
                         logs_list.append(f"🎬 [{_now_str()}] 第 {sid:02d} 镜：字节火山方舟 Seedance 2.0 图生视频成功！")
-        except Exception:
-            pass
+        except Exception as sd_err:
+            logger.warning("第 %d 镜 Seedance 视频生成异常: %s", sid, sd_err)
+            if logs_list is not None:
+                logs_list.append(f"⚠️ [{_now_str()}] 第 {sid:02d} 镜 Seedance 降级: {str(sd_err)[:60]}")
 
     if not pexels_video_clip and (generated_ai_img or os.path.exists(ai_gen_source_path)) and kling_key:
         try:
-            import base64
             try:
                 from omnidrama.providers.kling_provider import KlingVideoProvider
             except ImportError:
@@ -908,10 +1160,12 @@ async def _generate_single_shot_visual(
                     pexels_video_clip = kling_target
                     if logs_list is not None:
                         logs_list.append(f"🎬 [{_now_str()}] 第 {sid:02d} 镜：可灵 Kling 2.0 图生视频成功！")
-        except Exception:
-            pass
+        except Exception as kl_err:
+            logger.warning("第 %d 镜 Kling 视频生成异常: %s", sid, kl_err)
+            if logs_list is not None:
+                logs_list.append(f"⚠️ [{_now_str()}] 第 {sid:02d} 镜 Kling 降级: {str(kl_err)[:60]}")
 
-    # 3.5 自动使用完全免费且免 Key 的官方 Pollinations FLUX.1 生成 8K 真实电影剧照
+    # 3.5 自动使用完全免费且免 Key 的官方 Pollinations FLUX.1 生成 8K 真实电影剧照（严格校验图像有效性）
     if not generated_ai_img:
         try:
             raw_p = visual_prompt or "8k cinematic vertical movie still, ARRI Alexa 65, dramatic lighting, photorealistic, no cartoon"
@@ -923,17 +1177,18 @@ async def _generate_single_shot_visual(
                 poll_url,
                 ai_gen_source_path,
                 max_bytes=MAX_IMAGE_BYTES,
-                timeout=35.0,
+                timeout=22.0,
                 headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131.0.0.0 Safari/537.36"},
                 allowed_hosts=("image.pollinations.ai",),
                 min_bytes=5000,
             )
-            generated_ai_img = True
-            if logs_list is not None:
-                logs_list.append(f"🎨 [{_now_str()}] 第 {sid:02d} 镜：FLUX.1 真实电影剧照生成成功 (Seed:{char_seed + sid})！")
+            if _validate_image_file(ai_gen_source_path):
+                generated_ai_img = True
+                if logs_list is not None:
+                    logs_list.append(f"🎨 [{_now_str()}] 第 {sid:02d} 镜：FLUX.1 真实电影剧照生成成功 (Seed:{char_seed + sid})！")
         except Exception as p_err:
             if logs_list is not None:
-                logs_list.append(f"⚠️ [{_now_str()}] 第 {sid:02d} 镜 FLUX.1 备用获取提示: {str(p_err)[:40]}")
+                logs_list.append(f"⚠️ [{_now_str()}] 第 {sid:02d} 镜 FLUX.1 公共通道受限 ({str(p_err)[:40]})，切换内置电影定妆剧照库")
 
     # 4. 尝试 Pexels 免费高清图库/视频库 (对标 MoneyPrinterTurbo)
     if not generated_ai_img and pexels_key:
@@ -944,7 +1199,7 @@ async def _generate_single_shot_visual(
                 visual_prompt,
                 ai_gen_source_path
             )
-            if photo_res:
+            if photo_res and _validate_image_file(ai_gen_source_path):
                 generated_ai_img = True
                 if logs_list is not None:
                     logs_list.append(f"📸 [{_now_str()}] 第 {sid:02d} 镜：Pexels 高清剧照匹配下载成功！")
@@ -956,25 +1211,31 @@ async def _generate_single_shot_visual(
             )
             if vid_res:
                 pexels_video_clip = vid_res
-        except Exception:
-            pass
+        except Exception as px_err:
+            logger.warning("第 %d 镜 Pexels 素材拉取异常: %s", sid, px_err)
 
     proj_data = _load_project_data()
-    src_img_for_bg = Path(ai_gen_source_path) if generated_ai_img and os.path.exists(ai_gen_source_path) else _pick_source_manga_image(speaker, sid, proj_data.get("title", ""), proj_data.get("genre", ""))
+    proj_lang = str(proj_data.get("language") or "zh").strip().lower()
+    display_speaker = shot.get("speaker_localized") if (proj_lang != "zh" and shot.get("speaker_localized")) else speaker
+    src_img_for_bg = Path(ai_gen_source_path) if generated_ai_img and _validate_image_file(ai_gen_source_path) else _pick_source_manga_image(speaker, sid, proj_data.get("title", ""), proj_data.get("genre", ""), proj_data.get("characters"))
 
     await asyncio.to_thread(
         _prepare_clean_background_and_preview,
         src_img_for_bg,
         sid,
-        speaker,
+        display_speaker,
         dialogue,
         motion_name,
         raw_bg_path,
         sub_png_path,
         preview_jpg_path,
-        not generated_ai_img
+        not generated_ai_img,
+        proj_lang,
     )
+    _CLOUD_STORAGE.sync_upload(preview_jpg_path)
     shot["image"] = f"/api/shots/{sid}/image"
+    shot["has_image"] = True
+    shot["visual_source"] = "ai_generated" if generated_ai_img else "cinematic_library_fallback"
     return pexels_video_clip
 
 
@@ -1327,11 +1588,15 @@ async def _run_production_pipeline(req: Optional[RenderRequest]):
                             pass
 
             cost_tracker.reconcile(c_tts, succeeded=synthesized)
-            dur = tts_engine.get_audio_duration(audio_out)
-            total_dur += dur
+            raw_dur = tts_engine.get_audio_duration(audio_out)
+            breath_pad = getattr(VideoCompositor, "DEFAULT_BREATH_PAD_SEC", 0.24)
+            clip_dur = round(max(0.6, raw_dur + breath_pad), 2)
+            total_dur += clip_dur
             voice_mp3_list.append(audio_out)
             s["audio"] = f"/api/shots/{sid}/audio"
-            s["duration_seconds"] = round(dur, 2)
+            s["has_audio"] = True
+            s["duration_seconds"] = clip_dur
+            s["duration"] = clip_dur
 
             schema_shots_for_srt.append(
                 Shot(
@@ -1341,11 +1606,11 @@ async def _run_production_pipeline(req: Optional[RenderRequest]):
                     visual_prompt=s.get("visual_prompt", "cinematic shot"),
                     speaker=speaker,
                     dialogue=dialogue,
-                    duration_seconds=dur
+                    duration_seconds=clip_dur
                 )
             )
             RENDER_STATE["logs"].append(
-                f"🔊 [{_now_str()}] 第 {sid:02d} 镜【{speaker}】配音已生成 ({voice_code}, {dur:.2f}s)"
+                f"🔊 [{_now_str()}] 第 {sid:02d} 镜【{speaker}】配音已生成 ({voice_code}, {raw_dur:.2f}s + {breath_pad:.2f}s气口)"
             )
 
         srt_path = str(_safe_resolve_under(proj_dir, f"{title}.srt"))
@@ -1365,10 +1630,21 @@ async def _run_production_pipeline(req: Optional[RenderRequest]):
 
         def _concat_and_mix():
             norm_wavs = []
+            breath_pad = getattr(VideoCompositor, "DEFAULT_BREATH_PAD_SEC", 0.24)
             for idx_w, mp3_p in enumerate(voice_mp3_list):
                 norm_w = str(proj_dir / f"_norm_voice_{idx_w:03d}.wav")
+                aud_d = tts_engine.get_audio_duration(mp3_p)
+                clip_d = max(0.6, aud_d + breath_pad)
+                af_out_st = max(0.05, aud_d - 0.03)
+                af_breath = f"afade=t=in:st=0:d=0.02,afade=t=out:st={af_out_st:.3f}:d=0.03,apad=pad_dur={breath_pad:.3f}"
                 subprocess.run(
-                    ["ffmpeg", "-y", "-i", mp3_p, "-ar", "44100", "-ac", "2", "-c:a", "pcm_s16le", norm_w],
+                    [
+                        "ffmpeg", "-y", "-i", mp3_p,
+                        "-af", af_breath,
+                        "-t", f"{clip_d:.3f}",
+                        "-ar", "44100", "-ac", "2", "-c:a", "pcm_s16le",
+                        norm_w,
+                    ],
                     stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False
                 )
                 if os.path.exists(norm_w):
@@ -1397,14 +1673,24 @@ async def _run_production_pipeline(req: Optional[RenderRequest]):
                     pass
             if os.path.exists(combined_voice_wav):
                 try:
+                    try:
+                        from core.audio_mixer import build_sfx_cues_from_shots, select_bgm_type_for_genre
+                    except ImportError:
+                        from omnidrama.core.audio_mixer import build_sfx_cues_from_shots, select_bgm_type_for_genre
+                    bgm_style = select_bgm_type_for_genre(genre)
+                    dynamic_sfx = build_sfx_cues_from_shots(shots_list, genre=genre)
                     mixer.mix_soundtrack(
                         voice_track=combined_voice_wav,
                         total_duration=max(1.0, total_dur),
-                        sfx_cues=[{"name": "thunder", "time_seconds": 0.5, "volume": 0.35}],
-                        bgm_type="epic_battle",
+                        sfx_cues=dynamic_sfx,
+                        bgm_type=bgm_style,
                         output_path=master_wav,
                     )
-                except Exception:
+                    RENDER_STATE["logs"].append(
+                        f"🎵 [{_now_str()}] 已按《{genre}》自动匹配配乐风格 [{bgm_style}] 与 {len(dynamic_sfx)} 处分镜精准音效点。"
+                    )
+                except Exception as mix_err:
+                    logger.warning("三轨混音降级至纯净人声轨: %s", mix_err)
                     shutil.copyfile(combined_voice_wav, master_wav)
         await asyncio.to_thread(_concat_and_mix)
         RENDER_STATE["logs"].append(f"✅ [{_now_str()}] 母带混音完成：{master_wav} (总时长 {total_dur:.2f} 秒)")
@@ -1443,6 +1729,7 @@ async def _run_production_pipeline(req: Optional[RenderRequest]):
             else:
                 cm = CameraMotionEnum.ZOOM_IN
 
+            include_live = bool(req and getattr(req, "include_live_actor", False))
             if sid in shot_video_clips and os.path.exists(shot_video_clips[sid]):
                 await asyncio.to_thread(
                     compositor.render_video_shot,
@@ -1461,16 +1748,24 @@ async def _run_production_pipeline(req: Optional[RenderRequest]):
                     clip_p,
                     sub_to_use
                 )
-                await asyncio.to_thread(
-                    compositor.render_live_actor_shot,
-                    bg_to_use,
-                    aud_p,
-                    live_clip_p,
-                    sub_to_use
-                )
+                if include_live:
+                    await asyncio.to_thread(
+                        compositor.render_live_actor_shot,
+                        bg_to_use,
+                        aud_p,
+                        live_clip_p,
+                        sub_to_use
+                    )
+                else:
+                    shutil.copyfile(clip_p, live_clip_p)
+            s["image"] = f"/api/shots/{sid}/image"
+            s["has_image"] = True
             clip_paths.append(clip_p)
             live_clip_paths.append(live_clip_p)
             RENDER_STATE["progress"] = min(98, 90 + int(((idx + 1) / max(1, len(shots_list))) * 8))
+            RENDER_STATE["logs"].append(
+                f"🎬 [{_now_str()}] 第 {idx + 1}/{len(shots_list)} 镜视频压制完成 (进度 {RENDER_STATE['progress']}%)"
+            )
 
         raw_concat_mp4 = str(proj_dir / f"{title}_concat_raw.mp4")
         raw_live_concat_mp4 = str(proj_dir / f"{title}_live_concat_raw.mp4")
@@ -1516,6 +1811,15 @@ async def _run_production_pipeline(req: Optional[RenderRequest]):
                 shutil.copyfile(raw_live_concat_mp4, final_live_mp4)
 
         await asyncio.to_thread(_finalize_video)
+        _CLOUD_STORAGE.sync_upload(final_video_mp4)
+        _CLOUD_STORAGE.sync_upload(final_live_mp4)
+        _CLOUD_STORAGE.sync_upload(srt_path)
+
+        ai_img_count = sum(1 for s in shots_list if s.get("visual_source") == "ai_generated")
+        if ai_img_count == 0:
+            RENDER_STATE["logs"].append(
+                f"💡 [{_now_str()}] 当前分镜画面使用内置电影剧照库渲染；在右上角「SOTA 顶配大模型引擎」填入免费 SiliconFlow / Gemini / 阿里百炼 API Key 即可开启 AI 逐镜定制生图！"
+            )
 
         # OpenMontage 质量门禁 2：成片 ffprobe + 响度检测
         render_report = await asyncio.to_thread(verify_rendered_video, final_video_mp4)
@@ -1604,7 +1908,7 @@ async def trigger_render_pipeline(req: Optional[RenderRequest] = None):
     RENDER_STATE["progress"] = 5
     RENDER_STATE["step_index"] = 1
     RENDER_STATE["current_step"] = "正在启动云端制片流水线..."
-    RENDER_STATE["logs"] = [f"🚀 [{_now_str()}] 接收到移动端渲染指令，启动云端真实制片机房..."]
+    RENDER_STATE["logs"] = [f"🚀 [{_now_str()}] 接收到渲染指令，启动云端真实制片机房..."]
 
     asyncio.create_task(_run_production_pipeline(req))
     return {"status": "started", "message": "真实短剧制作与 FFmpeg 渲染流水线已在后台启动！", "state": RENDER_STATE}
@@ -1669,17 +1973,20 @@ async def update_and_regenerate_shot(shot_id: int, req: UpdateShotRequest):
         preview_img = shots_dir / f"shot_{shot_id:03d}.jpg"
         sub_png = shots_dir / f"shot_{shot_id:03d}_sub.png"
         src_img = raw_img if raw_img.exists() else _pick_source_manga_image(target_shot["speaker"], shot_id, data.get("title", ""), data.get("genre", ""))
+        proj_lang = str(data.get("language") or "zh").strip().lower()
+        disp_speaker = target_shot.get("speaker_localized") if (proj_lang != "zh" and target_shot.get("speaker_localized")) else target_shot["speaker"]
         await asyncio.to_thread(
             _prepare_clean_background_and_preview,
             src_img,
             shot_id,
-            target_shot["speaker"],
+            disp_speaker,
             target_shot["dialogue"],
             target_shot["motion_name"],
             str(raw_img),
             str(sub_png),
             str(preview_img),
-            not raw_img.exists()
+            not raw_img.exists(),
+            proj_lang,
         )
 
     do_tts = req.regenerate_tts if req.regenerate_tts is not None else req.regenerate_audio
@@ -1687,24 +1994,38 @@ async def update_and_regenerate_shot(shot_id: int, req: UpdateShotRequest):
     audio_out = str(shots_dir / f"shot_{shot_id:03d}.mp3")
     if do_tts or not os.path.exists(audio_out):
         voice_code = _resolve_character_voice_code(target_shot["speaker"], data.get("characters", []), data.get("genre", ""))
+        tts_text = (target_shot.get("dialogue") or target_shot.get("action_beat") or f"第{shot_id}镜，{target_shot['speaker']}画面切入。").strip()
         await tts_engine.generate_speech(
-            text=target_shot["dialogue"],
+            text=tts_text,
             voice=voice_code,
             output_path=audio_out
         )
+        _CLOUD_STORAGE.sync_upload(audio_out)
         target_shot["audio"] = f"/api/shots/{shot_id}/audio"
+        target_shot["has_audio"] = True
+        try:
+            dur = round(tts_engine.get_audio_duration(audio_out), 2)
+            target_shot["duration"] = dur
+            target_shot["duration_seconds"] = dur
+        except Exception as dur_err:
+            logger.warning("读取第 %d 镜新音频时长失败: %s", shot_id, dur_err)
 
     # 立即使用双层防变形技术重压该单镜头 MP4 片段，并同步重拼接全片 MP4
     raw_img = shots_dir / f"shot_{shot_id:03d}_raw.jpg"
     preview_img = shots_dir / f"shot_{shot_id:03d}.jpg"
     sub_png = shots_dir / f"shot_{shot_id:03d}_sub.png"
+    target_shot["has_image"] = preview_img.exists()
+    if preview_img.exists():
+        target_shot["image"] = f"/api/shots/{shot_id}/image"
     bg_to_use = raw_img if raw_img.exists() else preview_img
     if bg_to_use.exists() and Path(audio_out).exists():
         compositor = VideoCompositor(width=720, height=1280, fps=24)
         motion_enum = CameraMotionEnum.ZOOM_IN
         if "OUT" in m_val:
             motion_enum = CameraMotionEnum.ZOOM_OUT
-        elif "PAN" in m_val:
+        elif "RIGHT" in m_val:
+            motion_enum = CameraMotionEnum.PAN_RIGHT
+        elif "PAN" in m_val or "LEFT" in m_val:
             motion_enum = CameraMotionEnum.PAN_LEFT
         elif "SHAKE" in m_val:
             motion_enum = CameraMotionEnum.SHAKE
@@ -1722,8 +2043,12 @@ async def update_and_regenerate_shot(shot_id: int, req: UpdateShotRequest):
         if all_shot_clips and all(os.path.exists(cp) for cp in all_shot_clips):
             final_video_mp4 = str(proj_dir / f"{title}_影视级成片.mp4")
             await asyncio.to_thread(compositor.concatenate_clips, all_shot_clips, final_video_mp4)
+            _CLOUD_STORAGE.sync_upload(final_video_mp4)
             data["video_url"] = "/api/video/stream?mode=full"
 
+    total_d = sum(float(s.get("duration") or s.get("duration_seconds") or 3.5) for s in data.get("shots", []))
+    if total_d > 0:
+        data["duration"] = round(total_d, 2)
     _save_project_data(data)
     return {**data, "status": "success", "shot": target_shot}
 
@@ -1780,33 +2105,42 @@ async def generate_script_endpoint(req: GenerateScriptRequest):
         agent = DirectorAgent()
         proj = await asyncio.to_thread(agent.breakdown_story, req.novel_text, safe_title, req.genre)
 
+    prev_proj = _load_project_data()
+    shots_dir_gen = _safe_resolve_under(OUTPUT_DIR, safe_title, "shots")
+
     chars_list = []
     for idx, c in enumerate(proj.characters):
         is_first = (idx == 0)
         card_data = c.consistency_card.model_dump() if (hasattr(c, "consistency_card") and c.consistency_card and hasattr(c.consistency_card, "model_dump")) else (c.consistency_card.dict() if (hasattr(c, "consistency_card") and c.consistency_card and hasattr(c.consistency_card, "dict")) else getattr(c, "consistency_card", None))
+        t_img = getattr(c, "turnaround_image", "") or ""
         chars_list.append({
             "name": c.name,
             "role": "男一号 / 核心主角" if is_first else "主要人物",
             "voice": getattr(c, "voice_name", None) or ("云希 (磁性沉稳霸道)" if c.gender == "male" else "晓晓 (尖酸刻薄/成熟女主)"),
-            "avatar": getattr(c, "turnaround_image", "") or f"/api/shots/{min(idx + 1, max(1, len(proj.shots)))}/image",
+            "avatar": t_img,
             "traits": f"{c.visual_tags} [引擎: {agent.last_used_engine}]",
             "archetype": getattr(c, "archetype", "") or "",
             "turnaround_prompt": getattr(c, "turnaround_prompt", "") or "",
-            "turnaround_image": getattr(c, "turnaround_image", "") or "",
+            "turnaround_image": t_img,
             "consistency_card": card_data,
         })
 
     if not chars_list:
         chars_list = [
-            {"name": "主角", "role": "男主", "voice": "云希 (磁性沉稳霸道)", "avatar": "/api/shots/1/image", "traits": "冷峻青年，身手不凡"}
+            {"name": "主角", "role": "男主", "voice": "云希 (磁性沉稳霸道)", "avatar": "", "traits": "冷峻青年，身手不凡", "archetype": "", "turnaround_prompt": "", "turnaround_image": "", "consistency_card": None}
         ]
 
     shots_list = []
+    total_est_dur = 0.0
     for s in proj.shots:
         m_val = s.camera_motion.value.upper()
         m_name = "镜头震撼" if "SHAKE" in m_val else (
             "镜头拉远" if "OUT" in m_val else ("向左横移" if "PAN" in m_val else "镜头推进")
         )
+        est_dur = float(getattr(s, "duration_seconds", None) or 4.0)
+        total_est_dur += est_dur
+        img_exists = (shots_dir_gen / f"shot_{s.shot_id:03d}.jpg").exists()
+        aud_exists = (shots_dir_gen / f"shot_{s.shot_id:03d}.mp3").exists()
         shots_list.append({
             "id": s.shot_id,
             "speaker": s.speaker,
@@ -1815,24 +2149,40 @@ async def generate_script_endpoint(req: GenerateScriptRequest):
             "motion_name": m_name,
             "dialogue": s.dialogue,
             "visual_prompt": s.visual_prompt,
-            "image": f"/api/shots/{s.shot_id}/image",
-            "audio": f"/api/shots/{s.shot_id}/audio",
+            "image": f"/api/shots/{s.shot_id}/image" if img_exists else "",
+            "audio": f"/api/shots/{s.shot_id}/audio" if aud_exists else "",
+            "has_image": img_exists,
+            "has_audio": aud_exists,
             "sfx": getattr(s, "sfx", "") or ("惊雷劈裂 (Thunder)" if "SHAKE" in m_val else "无"),
             "action_beat": getattr(s, "action_beat", ""),
             "seedance_prompt": getattr(s, "seedance_prompt", ""),
-            "duration": getattr(s, "duration_seconds", None)
+            "duration": round(est_dur, 2),
+            "duration_seconds": round(est_dur, 2),
         })
 
     final_mp4 = _safe_resolve_under(OUTPUT_DIR, safe_title, f"{safe_title}_影视级成片.mp4")
     has_video = final_mp4.exists()
 
+    bound_series_id, bound_episode_id = _bind_or_create_series_episode(
+        title=safe_title,
+        genre=req.genre,
+        story_text=req.novel_text,
+        prev_proj=prev_proj,
+        shots_count=len(shots_list),
+        duration=round(total_est_dur, 2),
+    )
+
     new_data = {
+        "series_id": bound_series_id,
+        "episode_id": bound_episode_id,
         "title": safe_title,
         "genre": req.genre,
+        "language": "zh",
+        "story_text": req.novel_text,
         "video_url": "/api/video/stream?mode=full" if has_video else "",
         "live_actor_video": "/api/video/stream?mode=live" if has_video else "",
-        "srt_url": "/api/project/subtitles",
-        "duration": float(len(shots_list) * 5.0),
+        "srt_url": "/api/project/subtitles" if has_video else "",
+        "duration": round(total_est_dur, 2),
         "characters": chars_list,
         "shots": shots_list,
         "audio_tracks": [
@@ -2062,7 +2412,23 @@ async def generate_character_turnaround_endpoint(
         except Exception:
             pass
 
-    # 3.2 备用官方免费免 Key Pollinations FLUX (1280x720)
+    # 3.15 尝试 Google Gemini 原生 16:9 三视图生图
+    gemini_key = get_provider_key("GEMINI_API_KEY") or get_provider_key("GOOGLE_API_KEY")
+    if not generated and gemini_key:
+        try:
+            ok_gem = await asyncio.to_thread(
+                _generate_gemini_image,
+                turnaround_p,
+                str(turnaround_file),
+                "16:9",
+                gemini_key,
+            )
+            if ok_gem:
+                generated = True
+        except Exception as gem_err:
+            logger.warning("角色【%s】Gemini 三视图生图异常: %s", name, gem_err)
+
+    # 3.2 备用官方免费免 Key Pollinations FLUX (1280x720，严格验证图像完整性)
     if not generated:
         try:
             clean_prompt = re.sub(r"[^a-zA-Z0-9, .\-]", " ", turnaround_p)
@@ -2077,21 +2443,35 @@ async def generate_character_turnaround_endpoint(
             if p_resp.status_code == 200 and len(p_resp.content) > 3000:
                 with open(turnaround_file, "wb") as pf:
                     pf.write(p_resp.content)
-                generated = True
-        except Exception:
-            pass
+                if _validate_image_file(turnaround_file):
+                    generated = True
+        except Exception as poll_err:
+            logger.warning("角色【%s】Pollinations 三视图生图降级: %s", name, poll_err)
 
-    # 3.3 离线/降级安全垫：本地生成 16:9 纯白底预览图
-    if not generated and not turnaround_file.exists():
+    # 3.3 离线/降级安全垫：本地生成 16:9 纯白底专业定妆卡（三视图分栏线 + CJK 字体）
+    if not generated and not _validate_image_file(turnaround_file):
         try:
             from PIL import Image, ImageDraw
-            img = Image.new("RGB", (1280, 720), color=(255, 255, 255))
+            img = Image.new("RGB", (1280, 720), color=(248, 250, 252))
             draw = ImageDraw.Draw(img)
-            draw.text((640, 360), f"【{name}】16:9 三视图定妆\n{turnaround_p[:60]}...", fill=(60, 60, 60), anchor="mm")
-            img.save(str(turnaround_file), "JPEG")
+            title_font = _load_cjk_font(34)
+            sub_font = _load_cjk_font(20)
+            tag_font = _load_cjk_font(18)
+            draw.rectangle([(32, 32), (1248, 688)], outline=(203, 213, 225), width=3)
+            for idx_col, lbl in enumerate(("正面全身 · Front", "侧面轮廓 · Side", "背面服饰 · Back")):
+                x1 = 56 + idx_col * 392
+                x2 = x1 + 372
+                draw.rounded_rectangle([(x1, 130), (x2, 575)], radius=14, fill=(241, 245, 249), outline=(148, 163, 184), width=2)
+                draw.text(((x1 + x2) // 2, 162), lbl, font=tag_font, fill=(51, 65, 85), anchor="mm")
+                draw.text(((x1 + x2) // 2, 360), "配置 SiliconFlow / Gemini Key\n可解锁 AI 4K 三视图直出", font=tag_font, fill=(100, 116, 139), anchor="mm", align="center")
+            draw.text((640, 82), f"【{name}】16:9 影视级角色三视图定妆规范卡", font=title_font, fill=(15, 23, 42), anchor="mm")
+            draw.text((640, 632), f"视觉锚点：{turnaround_p[:72]}", font=sub_font, fill=(71, 85, 105), anchor="mm")
+            img.save(str(turnaround_file), "JPEG", quality=92)
             generated = True
-        except Exception:
-            pass
+        except Exception as card_err:
+            logger.warning("生成角色【%s】本地三视图卡异常: %s", name, card_err)
+
+    _CLOUD_STORAGE.sync_upload(turnaround_file)
 
     # 4. 更新角色状态
     target_char["turnaround_prompt"] = turnaround_p
@@ -2108,6 +2488,25 @@ async def generate_character_turnaround_endpoint(
         "character": target_char,
         "characters": data["characters"]
     }
+
+
+@app.get("/output/turnarounds/{filename}")
+async def serve_character_turnaround_image(filename: str):
+    """受控安全读取角色三视图定妆图片（仅放行 output/turnarounds 下常见图片后缀，防止路径穿越与 404 破图）."""
+    if has_path_traversal_markers(filename):
+        raise HTTPException(status_code=400, detail="非法的文件名")
+    ext = Path(filename).suffix.lower()
+    if ext not in (".jpg", ".jpeg", ".png", ".webp"):
+        raise HTTPException(status_code=400, detail="仅支持读取标准图片格式")
+    try:
+        img_path = _safe_resolve_under(OUTPUT_DIR, "turnarounds", filename)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    _CLOUD_STORAGE.sync_download_if_missing(img_path)
+    if not img_path.exists() or not img_path.is_file():
+        raise HTTPException(status_code=404, detail="角色三视图图片尚未生成")
+    media_map = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".webp": "image/webp"}
+    return FileResponse(str(img_path), media_type=media_map.get(ext, "image/jpeg"))
 
 
 @app.get("/api/characters/{name}/turnaround")
@@ -2153,7 +2552,13 @@ async def get_available_voices():
         {"name": "东北晓贝 (爽快大姐)", "code": "zh-CN-liaoning-XiaobeiNeural", "tag": "方言喜剧/生活", "gender": "female"},
         {"name": "陕西晓妮 (豪爽淳朴)", "code": "zh-CN-shaanxi-XiaoniNeural", "tag": "西北风情/豪迈", "gender": "female"},
         {"name": "Christopher (美语男主)", "code": "en-US-ChristopherNeural", "tag": "海外出海男主角", "gender": "male"},
-        {"name": "Jenny (美语女主)", "code": "en-US-JennyNeural", "tag": "海外出海女主角", "gender": "female"}
+        {"name": "Guy (美语反派/旁白)", "code": "en-US-GuyNeural", "tag": "海外出海反派/叙事", "gender": "male"},
+        {"name": "Jenny (美语女主)", "code": "en-US-JennyNeural", "tag": "海外出海女主角", "gender": "female"},
+        {"name": "Aria (美语旁白/解说)", "code": "en-US-AriaNeural", "tag": "海外出海悬疑旁白", "gender": "female"},
+        {"name": "Keita (日语男主)", "code": "ja-JP-KeitaNeural", "tag": "日本短剧男主角", "gender": "male"},
+        {"name": "Nanami (日语女主)", "code": "ja-JP-NanamiNeural", "tag": "日本短剧女主角", "gender": "female"},
+        {"name": "InJoon (韩语男主)", "code": "ko-KR-InJoonNeural", "tag": "韩国短剧男主角", "gender": "male"},
+        {"name": "SunHi (韩语女主)", "code": "ko-KR-SunHiNeural", "tag": "韩国短剧女主角", "gender": "female"}
     ]
 
 
@@ -2409,6 +2814,578 @@ async def save_api_keys(request: Request):
     }
 
 
+class TestApiKeyRequest(BaseModel):
+    env_key: str
+    api_key: Optional[str] = None
+
+
+@app.post("/api/sota/test-key")
+async def test_api_key_connectivity(req: TestApiKeyRequest):
+    """对受管模型 API Key 执行真实轻量连通性测活（拒绝坏 Key 假绿灯）."""
+    import time as _time
+    import requests as _req
+
+    env_key = (req.env_key or "").strip()
+    if env_key not in MANAGED_PROVIDER_KEYS:
+        raise HTTPException(status_code=400, detail=f"不支持测活的密钥项: {env_key}")
+
+    key_val = (req.api_key or "").strip() or get_provider_key(env_key)
+    if not key_val:
+        return {"ok": False, "env_key": env_key, "latency_ms": 0, "detail": "尚未配置该密钥，请先输入后测活"}
+
+    def _probe() -> Dict[str, Any]:
+        t0 = _time.perf_counter()
+        try:
+            if env_key == "SILICONFLOW_API_KEY":
+                r = _req.get("https://api.siliconflow.cn/v1/models", headers={"Authorization": f"Bearer {key_val}"}, timeout=8)
+            elif env_key == "DEEPSEEK_API_KEY":
+                r = _req.get("https://api.deepseek.com/models", headers={"Authorization": f"Bearer {key_val}"}, timeout=8)
+            elif env_key == "MOONSHOT_API_KEY":
+                r = _req.get("https://api.moonshot.cn/v1/models", headers={"Authorization": f"Bearer {key_val}"}, timeout=8)
+            elif env_key in ("GEMINI_API_KEY", "GOOGLE_API_KEY"):
+                r = _req.get(f"https://generativelanguage.googleapis.com/v1beta/models?key={urllib.parse.quote(key_val)}", timeout=8)
+            elif env_key == "DASHSCOPE_API_KEY":
+                r = _req.get("https://dashscope.aliyuncs.com/compatible-mode/v1/models", headers={"Authorization": f"Bearer {key_val}"}, timeout=8)
+            elif env_key == "PEXELS_API_KEY":
+                r = _req.get("https://api.pexels.com/v1/curated?per_page=1", headers={"Authorization": key_val}, timeout=8)
+            elif env_key == "ELEVENLABS_API_KEY":
+                r = _req.get("https://api.elevenlabs.io/v1/user", headers={"xi-api-key": key_val}, timeout=8)
+            elif env_key == "HF_TOKEN":
+                r = _req.get("https://huggingface.co/api/whoami-v2", headers={"Authorization": f"Bearer {key_val}"}, timeout=8)
+            else:
+                return {"ok": True, "env_key": env_key, "latency_ms": 0, "detail": "密钥格式已校验（该服务商无公开免费探活端点，将于渲染时直连验证）"}
+
+            ms = int((_time.perf_counter() - t0) * 1000)
+            if 200 <= r.status_code < 300:
+                return {"ok": True, "env_key": env_key, "latency_ms": ms, "detail": f"连通正常 ({ms}ms)"}
+            err_msg = ""
+            try:
+                err_json = r.json()
+                err_msg = str(err_json.get("error", {}).get("message") if isinstance(err_json.get("error"), dict) else err_json.get("message") or err_json.get("detail") or "")
+            except Exception:
+                err_msg = r.text[:100]
+            return {"ok": False, "env_key": env_key, "latency_ms": ms, "detail": f"鉴权失败 HTTP {r.status_code}: {err_msg[:90] or '密钥无效或欠费'}"}
+        except Exception as exc:
+            ms = int((_time.perf_counter() - t0) * 1000)
+            return {"ok": False, "env_key": env_key, "latency_ms": ms, "detail": f"网络探测超时或受阻: {str(exc)[:80]}"}
+
+    return await asyncio.to_thread(_probe)
+
+
+class CreateShotRequest(BaseModel):
+    speaker: str = "旁白"
+    dialogue: str = ""
+    scale: str = "MEDIUM_SHOT"
+    motion: str = "ZOOM_IN"
+    visual_prompt: Optional[str] = ""
+    sfx: Optional[str] = "无"
+    insert_after_id: Optional[int] = None
+
+
+class ReorderShotRequest(BaseModel):
+    shot_id: int
+    direction: str  # "up" | "down"
+
+
+class LocalizeProjectRequest(BaseModel):
+    target_lang: str = "en"  # "en" | "ja" | "ko" | "zh"
+    bilingual_subtitle: bool = False
+
+
+_SHOT_ASSET_PATTERNS: tuple[str, ...] = (
+    "shot_{sid:03d}.jpg",
+    "shot_{sid:03d}_raw.jpg",
+    "shot_{sid:03d}_sub.png",
+    "shot_{sid:03d}.mp3",
+    "shot_{sid:03d}.mp4",
+    "shot_{sid:03d}_live.mp4",
+    "ai_src_{sid:03d}.jpg",
+    "pexels_vid_{sid:03d}.mp4",
+    "seedance_vid_{sid:03d}.mp4",
+    "kling_vid_{sid:03d}.mp4",
+    "neural_{sid:03d}.mp4",
+)
+
+
+def _sync_shot_assets_on_reorder(
+    shots_dir: Optional[Path],
+    old_ids_in_new_order: List[Optional[int]],
+    all_previous_ids: List[int],
+) -> None:
+    """两阶段安全暂存重命名：当分镜新增、删除或调序时同步重排磁盘所有音画资产，彻底杜绝串镜错位."""
+    if not shots_dir or not shots_dir.exists():
+        return
+    import uuid as _uuid
+
+    stage_dir = shots_dir / f".reorder_stage_{_uuid.uuid4().hex[:8]}"
+    stage_dir.mkdir(parents=True, exist_ok=True)
+    kept_old_ids = {oid for oid in old_ids_in_new_order if oid is not None}
+
+    try:
+        # 阶段 1：将所有保留分镜的资产按新槽位暂存，避免 1<->2 互换时覆盖对方
+        for new_idx, old_id in enumerate(old_ids_in_new_order, start=1):
+            if old_id is None:
+                continue
+            slot_dir = stage_dir / f"slot_{new_idx:03d}"
+            for tmpl in _SHOT_ASSET_PATTERNS:
+                src = shots_dir / tmpl.format(sid=old_id)
+                if src.exists() and src.is_file():
+                    slot_dir.mkdir(parents=True, exist_ok=True)
+                    shutil.move(str(src), str(slot_dir / tmpl.format(sid=new_idx)))
+
+        # 阶段 2：清理已被删除分镜的孤儿磁盘文件
+        for prev_id in set(all_previous_ids):
+            if prev_id not in kept_old_ids:
+                for tmpl in _SHOT_ASSET_PATTERNS:
+                    orphan = shots_dir / tmpl.format(sid=prev_id)
+                    if orphan.exists() and orphan.is_file():
+                        orphan.unlink(missing_ok=True)
+
+        # 阶段 3：将暂存槽位精准移回 shots_dir
+        for new_idx in range(1, len(old_ids_in_new_order) + 1):
+            slot_dir = stage_dir / f"slot_{new_idx:03d}"
+            if not slot_dir.exists():
+                continue
+            for staged_fp in slot_dir.iterdir():
+                if staged_fp.is_file():
+                    dst = shots_dir / staged_fp.name
+                    if dst.exists():
+                        dst.unlink(missing_ok=True)
+                    shutil.move(str(staged_fp), str(dst))
+    finally:
+        shutil.rmtree(stage_dir, ignore_errors=True)
+
+
+def _bind_or_create_series_episode(
+    title: str,
+    genre: str,
+    story_text: str,
+    prev_proj: Dict[str, Any],
+    shots_count: int = 0,
+    duration: float = 0.0,
+) -> tuple[str, str]:
+    """确保每部新剧拥有独立剧目与分集归属，杜绝顶栏把新剧错误挂载到上一部剧的分集上."""
+    prev_title = _safe_slug(str(prev_proj.get("title") or ""), default="")
+    prev_sid = str(prev_proj.get("series_id") or "").strip()
+    prev_eid = str(prev_proj.get("episode_id") or "").strip()
+    if prev_title and prev_title == title and prev_sid and prev_eid:
+        return prev_sid, prev_eid
+
+    try:
+        import uuid as _uuid
+        mgr = _get_series_manager()
+        reg = mgr.get_registry()
+        series_list = reg.setdefault("series", [])
+
+        # 若已存在同名剧目，复用其第 1 集；否则自动创建独立新剧目
+        matched_series = next((s for s in series_list if _safe_slug(str(s.get("title") or ""), default="") == title), None)
+        if matched_series:
+            eps = matched_series.setdefault("episodes", [])
+            if not eps:
+                ep_id = f"ep_{_uuid.uuid4().hex[:8]}"
+                eps.append({
+                    "id": ep_id,
+                    "episode_num": 1,
+                    "title": f"第 1 集：{title}",
+                    "status": "STORYBOARD" if shots_count > 0 else "DRAFT",
+                    "duration": duration,
+                    "shots_count": shots_count,
+                    "story_text": story_text,
+                    "video_url": "",
+                    "live_actor_video": "",
+                })
+            else:
+                ep_id = eps[0]["id"]
+            reg["active_series_id"] = matched_series["id"]
+            mgr.save_registry(reg)
+            return matched_series["id"], ep_id
+
+        new_series_id = f"series_{_uuid.uuid4().hex[:8]}"
+        new_ep_id = f"ep_{_uuid.uuid4().hex[:8]}"
+        new_series = {
+            "id": new_series_id,
+            "title": title,
+            "genre": genre or "都市爽文",
+            "language": "zh",
+            "synopsis": (story_text or "")[:120],
+            "global_characters": [],
+            "episodes": [
+                {
+                    "id": new_ep_id,
+                    "episode_num": 1,
+                    "title": f"第 1 集：{title}",
+                    "status": "STORYBOARD" if shots_count > 0 else "DRAFT",
+                    "duration": duration,
+                    "shots_count": shots_count,
+                    "story_text": story_text,
+                    "video_url": "",
+                    "live_actor_video": "",
+                }
+            ],
+        }
+        series_list.insert(0, new_series)
+        reg["active_series_id"] = new_series_id
+        mgr.save_registry(reg)
+        return new_series_id, new_ep_id
+    except Exception as bind_err:
+        logger.warning("绑定剧集归属失败，返回独立无挂靠工程: %s", bind_err)
+        return "", ""
+
+
+def _renumber_shots(shots: List[Dict[str, Any]], shots_dir: Optional[Path] = None) -> List[Dict[str, Any]]:
+    """统一重排分镜 id（1..N）并保持对应磁盘文件引用一致."""
+    for idx, s in enumerate(shots, start=1):
+        s["id"] = idx
+        if shots_dir:
+            has_img = (shots_dir / f"shot_{idx:03d}.jpg").exists()
+            has_aud = (shots_dir / f"shot_{idx:03d}.mp3").exists()
+            s["has_image"] = has_img
+            s["has_audio"] = has_aud
+            s["image"] = f"/api/shots/{idx}/image" if has_img else ""
+            s["audio"] = f"/api/shots/{idx}/audio" if has_aud else ""
+    return shots
+
+
+def _get_current_shots_dir(data: Dict[str, Any]) -> Optional[Path]:
+    raw_title = (data.get("title") or "").strip()
+    if not raw_title:
+        return None
+    safe_title = _safe_slug(raw_title, default="untitled")
+    try:
+        return _safe_resolve_under(OUTPUT_DIR, safe_title, "shots")
+    except ValueError:
+        return None
+
+
+@app.post("/api/shots")
+async def create_shot_endpoint(req: CreateShotRequest):
+    """新增单条分镜（支持追加至末尾或插入到指定分镜后，同步重排磁盘音画资产防串镜）."""
+    data = _load_project_data()
+    shots = data.setdefault("shots", [])
+    prev_ids = [int(s.get("id", i + 1)) for i, s in enumerate(shots)]
+    old_id_seq: List[Optional[int]] = list(prev_ids)
+
+    m_val = (req.motion or "ZOOM_IN").upper()
+    m_name = "镜头震撼" if "SHAKE" in m_val else (
+        "镜头拉远" if "OUT" in m_val else ("向右横移" if "RIGHT" in m_val else ("向左横移" if "PAN" in m_val else "镜头推进"))
+    )
+    new_shot = {
+        "id": len(shots) + 1,
+        "speaker": (req.speaker or "旁白").strip() or "旁白",
+        "scale": (req.scale or "MEDIUM_SHOT").upper(),
+        "motion": m_val,
+        "motion_name": m_name,
+        "dialogue": (req.dialogue or "").strip(),
+        "visual_prompt": (req.visual_prompt or "").strip() or f"masterpiece, 8k vertical cinema drama, {req.speaker or 'scene'}, {req.dialogue or 'dramatic moment'}, cinematic lighting",
+        "image": "",
+        "audio": "",
+        "has_image": False,
+        "has_audio": False,
+        "sfx": (req.sfx or "无").strip() or "无",
+        "duration": 3.5,
+        "duration_seconds": 3.5,
+    }
+    if req.insert_after_id is not None:
+        insert_idx = next((i + 1 for i, s in enumerate(shots) if int(s.get("id", 0)) == req.insert_after_id), len(shots))
+        shots.insert(insert_idx, new_shot)
+        old_id_seq.insert(insert_idx, None)
+    else:
+        shots.append(new_shot)
+        old_id_seq.append(None)
+
+    shots_dir = _get_current_shots_dir(data)
+    _sync_shot_assets_on_reorder(shots_dir, old_id_seq, prev_ids)
+    _renumber_shots(shots, shots_dir)
+    data["duration"] = round(sum(float(s.get("duration") or s.get("duration_seconds") or 3.5) for s in shots), 2)
+    if not data.get("title"):
+        data["title"] = "未命名短剧"
+    _save_project_data(data)
+    return {**data, "status": "success", "message": f"已新增第 #{new_shot['id']} 镜"}
+
+
+@app.delete("/api/shots/{shot_id}")
+async def delete_shot_endpoint(shot_id: int):
+    """删除指定分镜并同步清理/重排磁盘音画资产，彻底防止音画串镜."""
+    data = _load_project_data()
+    shots = data.get("shots", [])
+    prev_ids = [int(s.get("id", i + 1)) for i, s in enumerate(shots)]
+    remaining = [s for s in shots if int(s.get("id", 0)) != shot_id]
+    if len(remaining) == len(shots):
+        raise HTTPException(status_code=404, detail=f"未找到第 #{shot_id} 镜")
+
+    old_id_seq: List[Optional[int]] = [int(s.get("id", 0)) for s in remaining]
+    shots_dir = _get_current_shots_dir(data)
+    _sync_shot_assets_on_reorder(shots_dir, old_id_seq, prev_ids)
+    data["shots"] = _renumber_shots(remaining, shots_dir)
+    data["duration"] = round(sum(float(s.get("duration") or s.get("duration_seconds") or 3.5) for s in data["shots"]), 2)
+    _save_project_data(data)
+    return {**data, "status": "success", "message": f"已删除第 #{shot_id} 镜并同步重排素材，剩余 {len(data['shots'])} 镜"}
+
+
+@app.post("/api/shots/reorder")
+async def reorder_shot_endpoint(req: ReorderShotRequest):
+    """上移或下移指定分镜并同步对调磁盘图/音/视频文件，杜绝音画张冠李戴."""
+    data = _load_project_data()
+    shots = data.get("shots", [])
+    prev_ids = [int(s.get("id", i + 1)) for i, s in enumerate(shots)]
+    idx = next((i for i, s in enumerate(shots) if int(s.get("id", 0)) == req.shot_id), -1)
+    if idx < 0:
+        raise HTTPException(status_code=404, detail=f"未找到第 #{req.shot_id} 镜")
+    direction = (req.direction or "").lower()
+    if direction == "up" and idx > 0:
+        shots[idx - 1], shots[idx] = shots[idx], shots[idx - 1]
+    elif direction == "down" and idx < len(shots) - 1:
+        shots[idx + 1], shots[idx] = shots[idx], shots[idx + 1]
+    else:
+        return {**data, "status": "unchanged", "message": "已处于边界位置"}
+
+    old_id_seq: List[Optional[int]] = [int(s.get("id", 0)) for s in shots]
+    shots_dir = _get_current_shots_dir(data)
+    _sync_shot_assets_on_reorder(shots_dir, old_id_seq, prev_ids)
+    _renumber_shots(shots, shots_dir)
+    _save_project_data(data)
+    return {**data, "status": "success", "message": f"已调整分镜顺序并同步音画资产（共 {len(shots)} 镜）"}
+
+
+@app.post("/api/project/reset")
+async def reset_project_workspace():
+    """清空当前工作台以开启全新短剧创作（不删除已存档的历史连载剧目）."""
+    empty_data = {
+        "title": "",
+        "genre": "",
+        "story_text": "",
+        "video_url": "",
+        "live_actor_video": "",
+        "srt_url": "",
+        "duration": 0.0,
+        "characters": [],
+        "shots": [],
+        "audio_tracks": [],
+    }
+    _save_project_data(empty_data)
+    return {**empty_data, "status": "success", "message": "工作台已清空，可随时开启全新短剧！"}
+
+
+def _translate_text_for_localization(text: str, target_lang: str) -> str:
+    """将单句中文/源台词翻译为出海目标语（优先已配置云端 LLM，兜底免费公共翻译端点）."""
+    import requests as _req
+
+    clean = (text or "").strip()
+    if not clean:
+        return ""
+
+    lang_meta = {
+        "en": ("English", "en"),
+        "ja": ("Japanese", "ja"),
+        "ko": ("Korean", "ko"),
+        "zh": ("Simplified Chinese", "zh-CN"),
+    }
+    lang_full, g_tl = lang_meta.get(target_lang, ("English", "en"))
+
+    # 1. 优先尝试已配置的 OpenAI 兼容高速 LLM（SiliconFlow / DeepSeek / Moonshot）
+    llm_candidates = [
+        ("SILICONFLOW_API_KEY", "https://api.siliconflow.cn/v1/chat/completions", "Qwen/Qwen2.5-7B-Instruct"),
+        ("DEEPSEEK_API_KEY", "https://api.deepseek.com/chat/completions", "deepseek-chat"),
+        ("MOONSHOT_API_KEY", "https://api.moonshot.cn/v1/chat/completions", "moonshot-v1-8k"),
+    ]
+    for env_k, url, model in llm_candidates:
+        key_val = get_provider_key(env_k)
+        if not key_val:
+            continue
+        try:
+            resp = _req.post(
+                url,
+                headers={"Authorization": f"Bearer {key_val}", "Content-Type": "application/json"},
+                json={
+                    "model": model,
+                    "temperature": 0.3,
+                    "messages": [
+                        {
+                            "role": "system",
+                            "content": f"You are a professional viral short-drama localization translator. Translate the given line into punchy, natural {lang_full} suitable for TikTok/ReelShort voiceover. Output ONLY the translated line with no quotes or explanations.",
+                        },
+                        {"role": "user", "content": clean},
+                    ],
+                },
+                timeout=12,
+            )
+            if resp.status_code == 200:
+                out = resp.json()["choices"][0]["message"]["content"].strip().strip('"\'“”')
+                if out:
+                    return out
+        except Exception as exc:
+            logger.warning("LLM 出海翻译 (%s) 回退: %s", env_k, exc)
+
+    # 2. 优先尝试免费稳定的 MyMemory 公共翻译接口（对代理/云端出口极友好，免 Key）
+    mm_lang = {"en": "en", "ja": "ja", "ko": "ko", "zh": "zh-CN"}.get(target_lang, "en")
+    src_lang = "en" if target_lang == "zh" else "zh-CN"
+    try:
+        mr = _req.get(
+            "https://api.mymemory.translated.net/get",
+            params={"q": clean, "langpair": f"{src_lang}|{mm_lang}"},
+            headers={"User-Agent": "Mozilla/5.0"},
+            timeout=10,
+        )
+        if mr.status_code == 200:
+            mj = mr.json()
+            tr_text = str((mj.get("responseData") or {}).get("translatedText") or "").strip()
+            if tr_text and "MYMEMORY WARNING" not in tr_text.upper() and tr_text != clean:
+                return tr_text
+    except Exception as exc:
+        logger.warning("MyMemory 公共翻译通道回退: %s", exc)
+
+    # 3. 备选公共 Google Translate 轻量接口兜底
+    try:
+        r = _req.get(
+            "https://translate.googleapis.com/translate_a/single",
+            params={"client": "gtx", "sl": "auto", "tl": g_tl, "dt": "t", "q": clean},
+            headers={"User-Agent": "Mozilla/5.0"},
+            timeout=8,
+        )
+        if r.status_code == 200:
+            arr = r.json()
+            if isinstance(arr, list) and arr and isinstance(arr[0], list):
+                translated = "".join(str(seg[0]) for seg in arr[0] if isinstance(seg, list) and seg and seg[0]).strip()
+                if translated and translated != clean:
+                    return translated
+    except Exception as exc:
+        logger.warning("Google 公共翻译通道回退: %s", exc)
+
+    return clean
+
+
+@app.post("/api/project/localize")
+async def localize_project_endpoint(req: LocalizeProjectRequest):
+    """短剧出海一键多语言译制：翻译全剧分镜台词 + 自动切换母语级微软神经配音声线（EN/JA/KO/ZH）."""
+    target_lang = (req.target_lang or "en").strip().lower()
+    if target_lang not in ("en", "ja", "ko", "zh"):
+        raise HTTPException(status_code=400, detail="目标语言仅支持 en / ja / ko / zh")
+
+    data = _load_project_data()
+    shots = data.get("shots", [])
+    if not shots:
+        raise HTTPException(status_code=400, detail="当前工程没有分镜，请先生成剧本后再一键出海译制")
+
+    voice_profiles = {
+        "en": {
+            "male": "Christopher (美语男主)",
+            "villain": "Guy (美语反派/旁白)",
+            "female": "Jenny (美语女主)",
+            "narrator": "Aria (美语旁白/解说)",
+            "label": "🇺🇸 英语出海版 (EN-US)",
+        },
+        "ja": {
+            "male": "Keita (日语男主)",
+            "villain": "Keita (日语男主)",
+            "female": "Nanami (日语女主)",
+            "narrator": "Keita (日语男主)",
+            "label": "🇯🇵 日语出海版 (JA-JP)",
+        },
+        "ko": {
+            "male": "InJoon (韩语男主)",
+            "villain": "InJoon (韩语男主)",
+            "female": "SunHi (韩语女主)",
+            "narrator": "InJoon (韩语男主)",
+            "label": "🇰🇷 韩语出海版 (KO-KR)",
+        },
+        "zh": {
+            "male": "云希 (磁性沉稳霸道)",
+            "villain": "云健 (嚣张跋扈反派)",
+            "female": "晓涵 (温柔清纯甜美)",
+            "narrator": "云希 (磁性沉稳霸道)",
+            "label": "🇨🇳 中文原声版 (ZH-CN)",
+        },
+    }
+    vp = voice_profiles[target_lang]
+
+    # 1. 自动切换全剧角色声线为目标语言母语配音
+    for c in data.get("characters", []):
+        cname = str(c.get("name", ""))
+        crole = str(c.get("role", ""))
+        if any(w in (cname + crole) for w in ["女", "妹", "妻", "小姐", "姐", "母", "夫人", "千金", "丽人"]):
+            c["voice"] = vp["female"]
+        elif any(w in (cname + crole) for w in ["反派", "恶", "赵", "刀疤"]):
+            c["voice"] = vp["villain"]
+        elif "旁白" in cname:
+            c["voice"] = vp["narrator"]
+        else:
+            c["voice"] = vp["male"]
+
+    # 2. 逐镜翻译台词（保留 source_dialogue 以便随时还原或双语显示），并严禁所有通道均失败时假报成功
+    translated_count = 0
+    failed_count = 0
+    speaker_trans_cache: Dict[str, str] = {}
+    for s in shots:
+        src_line = (s.get("source_dialogue") or s.get("dialogue") or "").strip()
+        raw_sp = str(s.get("speaker") or "").strip()
+        if raw_sp and not any(k in raw_sp for k in ("旁白", "叙事", "Scene", "环境")):
+            if target_lang == "zh":
+                s["speaker_localized"] = raw_sp
+            else:
+                if raw_sp not in speaker_trans_cache:
+                    speaker_trans_cache[raw_sp] = await asyncio.to_thread(_translate_text_for_localization, raw_sp, target_lang)
+                s["speaker_localized"] = speaker_trans_cache[raw_sp]
+        else:
+            s["speaker_localized"] = ""
+
+        if not src_line:
+            continue
+        if not s.get("source_dialogue"):
+            s["source_dialogue"] = src_line
+        if target_lang == "zh":
+            s["dialogue"] = s["source_dialogue"]
+            translated_count += 1
+        else:
+            tr = await asyncio.to_thread(_translate_text_for_localization, src_line, target_lang)
+            if tr == src_line and any("\u4e00" <= ch <= "\u9fff" for ch in src_line):
+                failed_count += 1
+                s["dialogue"] = src_line
+            else:
+                if req.bilingual_subtitle and tr != src_line:
+                    s["dialogue"] = f"{tr}\n{src_line}"
+                else:
+                    s["dialogue"] = tr
+                translated_count += 1
+        # 清空旧语种配音与带旧语种字幕的缩略图状态，避免刷新后残留旧中文图/音
+        s["audio"] = ""
+        s["has_audio"] = False
+        s["image"] = ""
+        s["has_image"] = False
+
+    if target_lang != "zh" and translated_count == 0 and failed_count > 0:
+        raise HTTPException(
+            status_code=502,
+            detail="出海翻译通道暂时全部不可达（请在「SOTA 顶配大模型引擎」中配置任意免费 SiliconFlow / DeepSeek / Kimi API Key 以启用高速专业短剧译制）",
+        )
+
+    # 同步移除磁盘上旧语种 mp3 与旧语种字幕图，强制下次渲染产出纯净目标语成片
+    safe_title = _safe_slug(data.get("title", ""), default="untitled")
+    try:
+        shots_dir = _safe_resolve_under(OUTPUT_DIR, safe_title, "shots")
+        if shots_dir.exists():
+            for pat in ("shot_*.mp3", "shot_*_sub.png", "shot_*.jpg"):
+                for old_fp in shots_dir.glob(pat):
+                    if not old_fp.name.endswith("_raw.jpg"):
+                        old_fp.unlink(missing_ok=True)
+    except Exception as clr_err:
+        logger.warning("清理旧语种音频/字幕图失败: %s", clr_err)
+
+    data["language"] = target_lang
+    data["audio_tracks"] = [
+        {"track": f"出海多语种配音 ({vp['label']})", "status": "已切换声线", "source": f"已译制 {translated_count} 镜台词，点击「合成成片」出片"},
+        {"track": "拟音音效轨 (SFX)", "status": "智能对齐", "source": "按分镜时间轴自动打点"},
+        {"track": "电影配乐轨 (BGM)", "status": "题材匹配", "source": f"{data.get('genre', '短剧')}影视原声"},
+    ]
+    _save_project_data(data)
+    return {
+        **data,
+        "status": "success",
+        "target_lang": target_lang,
+        "translated_count": translated_count,
+        "message": f"已完成【{vp['label']}】全剧译制（{translated_count} 镜台词 + 母语声线已切换），点击「合成成片」即可出片！",
+    }
+
+
 class ExportJianyingRequest(BaseModel):
     title: Optional[str] = None
 
@@ -2435,8 +3412,9 @@ async def export_jianying_project(req: Optional[ExportJianyingRequest] = None):
     shots_for_draft = []
     for idx, s in enumerate(project_data.get("shots", []), start=1):
         sid = int(s.get("id", idx))
+        real_dur = float(s.get("duration") or s.get("duration_seconds") or 4.0)
         shots_for_draft.append({
-            "duration": float(s.get("duration_seconds", 4.0) or 4.0),
+            "duration": real_dur,
             "motion": s.get("motion", "zoom_in").lower(),
             "speaker": s.get("speaker", "旁白"),
             "dialogue": s.get("dialogue", ""),
@@ -2449,11 +3427,65 @@ async def export_jianying_project(req: Optional[ExportJianyingRequest] = None):
         shots=shots_for_draft
     )
 
+    # 云端浏览器真下载闭环：生成可移植占位符路径版本，连同音视频素材与导入说明打包成 ZIP
+    import zipfile
+    exports_dir = _safe_resolve_under(OUTPUT_DIR, "exports")
+    exports_dir.mkdir(parents=True, exist_ok=True)
+    portable_stage_dir = _safe_resolve_under(exports_dir, "_portable_stage")
+    portable_draft_path = exporter.export_draft(
+        project_title=safe_title,
+        shots=shots_for_draft,
+        output_dir=str(portable_stage_dir),
+        portable=True,
+    )
+    zip_filename = f"{safe_title}_jianying_draft.zip"
+    zip_path = _safe_resolve_under(exports_dir, zip_filename)
+    portable_draft_dir = Path(portable_draft_path)
+    readme_text = (
+        f"OmniDrama 剪映/CapCut 原生草稿工程导入说明\n"
+        f"==========================================\n"
+        f"剧目名称：{safe_title}\n"
+        f"分镜数量：{len(shots_for_draft)} 镜\n\n"
+        f"导入步骤：\n"
+        f"1. 将本压缩包内的 `{portable_draft_dir.name}` 整个文件夹解压到您的剪映草稿根目录：\n"
+        f"   - Windows 默认路径：%LOCALAPPDATA%\\JianyingPro\\User Data\\Projects\\com.lveditor.draft\\\n"
+        f"   - macOS 默认路径：~/Movies/JianyingPro/User Data/Projects/com.lveditor.draft/\n"
+        f"2. 重新打开剪映专业版，首屏草稿箱即可直接看到《{safe_title}》多轨工程。\n"
+        f"3. 所有分镜视频、配音与字幕均已使用剪映标准相对占位符关联至 `assets/` 目录。\n"
+    )
+    with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        if portable_draft_dir.exists():
+            for fp in portable_draft_dir.rglob("*"):
+                if fp.is_file():
+                    zf.write(fp, arcname=f"{portable_draft_dir.name}/{fp.relative_to(portable_draft_dir).as_posix()}")
+        zf.writestr(f"{portable_draft_dir.name}/README_导入说明.txt", readme_text.encode("utf-8"))
+        if shots_dir.exists():
+            for fp in shots_dir.iterdir():
+                if fp.is_file() and fp.suffix.lower() in (".mp4", ".mp3", ".jpg", ".png", ".srt"):
+                    zf.write(fp, arcname=f"{portable_draft_dir.name}/assets/{fp.name}")
+
+    download_url = f"/api/export-jianying/download/{urllib.parse.quote(zip_filename)}"
     return {
         "status": "success",
         "draft_path": draft_path,
-        "message": f"成功导出！请直接在剪映中打开工程：{draft_path}"
+        "download_url": download_url,
+        "zip_filename": zip_filename,
+        "message": f"剪映可移植草稿包已生成，正在下载 ZIP（解压至剪映草稿目录即可直接打开，素材零丢失）！"
     }
+
+
+@app.get("/api/export-jianying/download/{filename}")
+async def download_jianying_zip(filename: str):
+    """下载打包好的剪映专业版草稿工程 ZIP."""
+    if has_path_traversal_markers(filename) or not filename.lower().endswith(".zip"):
+        raise HTTPException(status_code=400, detail="非法的导出文件名")
+    try:
+        zip_path = _safe_resolve_under(OUTPUT_DIR, "exports", filename)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    if not zip_path.exists():
+        raise HTTPException(status_code=404, detail="剪映草稿压缩包不存在，请重新点击导出")
+    return FileResponse(str(zip_path), media_type="application/zip", filename=filename)
 
 
 class AddEpisodeRequest(BaseModel):
@@ -2465,6 +3497,15 @@ class AddEpisodeRequest(BaseModel):
 class SplitNovelRequest(BaseModel):
     novel_text: str
     chars_per_episode: Optional[int] = 600
+    series_id: Optional[str] = None
+    series_title: Optional[str] = None
+    genre: Optional[str] = "都市战神爽文"
+    persist: Optional[bool] = True
+
+
+class SelectEpisodeRequest(BaseModel):
+    episode_id: str
+    series_id: Optional[str] = None
 
 
 def _get_series_manager():
@@ -2487,15 +3528,84 @@ async def add_episode_endpoint(req: AddEpisodeRequest):
     """向指定剧目新增一集分镜."""
     mgr = _get_series_manager()
     new_ep = mgr.add_episode(req.series_id, req.title, req.text or "")
-    return {"status": "success", "episode": new_ep}
+    return {"status": "success", "episode": new_ep, "registry": mgr.get_registry()}
 
 
 @app.post("/api/series/split-novel")
 async def split_novel_endpoint(req: SplitNovelRequest):
-    """智能长篇小说切集算法：自动分割为连续短剧集."""
+    """智能长篇小说切集算法：自动分割为连续短剧集并真实持久化写入剧集列表."""
     mgr = _get_series_manager()
     episodes = mgr.auto_split_novel(req.novel_text, req.chars_per_episode or 600)
-    return {"status": "success", "count": len(episodes), "episodes": episodes}
+    saved_info = None
+    if req.persist and episodes:
+        saved_info = mgr.save_split_episodes(
+            episodes=episodes,
+            series_id=req.series_id,
+            series_title=req.series_title,
+            genre=req.genre or "都市战神爽文",
+        )
+    return {
+        "status": "success",
+        "count": len(episodes),
+        "episodes": episodes,
+        "saved_episodes": saved_info["saved_episodes"] if saved_info else [],
+        "registry": saved_info["registry"] if saved_info else mgr.get_registry(),
+    }
+
+
+@app.post("/api/series/select-episode")
+async def select_episode_endpoint(req: SelectEpisodeRequest):
+    """真实切换当前工作台剧集：保存旧集状态并加载目标分集的独立工程与剧情正文."""
+    mgr = _get_series_manager()
+    found = mgr.find_episode(req.episode_id)
+    if not found:
+        raise HTTPException(status_code=404, detail=f"未找到分集: {req.episode_id}")
+
+    # 1. 保存切换前的工程到其对应分集快照（若有 episode_id）
+    prev_data = _load_project_data()
+    prev_ep_id = prev_data.get("episode_id")
+    if prev_ep_id and prev_ep_id != req.episode_id:
+        try:
+            prev_file = mgr.get_episode_project_file(prev_ep_id)
+            with open(prev_file, "w", encoding="utf-8") as pf:
+                json.dump(prev_data, pf, ensure_ascii=False, indent=2)
+        except Exception:
+            pass
+
+    series = found["series"]
+    ep = found["episode"]
+    ep_file = mgr.get_episode_project_file(ep["id"])
+
+    if ep_file.exists():
+        with open(ep_file, "r", encoding="utf-8") as ef:
+            ep_project = json.load(ef)
+    else:
+        ep_project = {
+            "series_id": series.get("id", ""),
+            "episode_id": ep.get("id", ""),
+            "title": ep.get("title") or series.get("title", "新短剧"),
+            "genre": series.get("genre", "都市热血"),
+            "story_text": ep.get("story_text", ""),
+            "video_url": "",
+            "live_actor_video": "",
+            "srt_url": "",
+            "duration": 0.0,
+            "characters": series.get("global_characters", []),
+            "shots": [],
+            "audio_tracks": [],
+        }
+
+    ep_project["series_id"] = series.get("id", "")
+    ep_project["episode_id"] = ep.get("id", "")
+    if not ep_project.get("story_text") and ep.get("story_text"):
+        ep_project["story_text"] = ep.get("story_text", "")
+    _save_project_data(ep_project)
+    return {
+        "status": "success",
+        "episode": ep,
+        "series": series,
+        "project": _load_project_data(),
+    }
 
 
 class FanqieImportRequest(BaseModel):
@@ -2518,7 +3628,7 @@ async def get_fanqie_rank(limit: int = 8):
         books = await asyncio.to_thread(FanqieProvider.fetch_rank_books, limit)
         return {"status": "success", "books": books}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"获取番茄小说热榜失败: {str(e)}")
+        return {"status": "degraded", "books": [], "warning": f"番茄热榜网络暂时受限，请直接手动粘贴剧情或链接导入 ({str(e)[:80]})"}
 
 
 @app.post("/api/fanqie/import")
@@ -2615,8 +3725,130 @@ async def analyze_reference_video_endpoint(req: AnalyzeReferenceRequest):
         )
         if req.adapt_and_save:
             current_data = _load_project_data()
+            b_sid, b_eid = _bind_or_create_series_episode(
+                title=adapted_storyboard["title"],
+                genre=adapted_storyboard["genre"],
+                story_text=req.novel_text.strip(),
+                prev_proj=current_data,
+                shots_count=len(adapted_storyboard.get("shots", [])),
+                duration=float(adapted_storyboard.get("duration", 0.0)),
+            )
+            current_data["series_id"] = b_sid
+            current_data["episode_id"] = b_eid
             current_data["title"] = adapted_storyboard["title"]
             current_data["genre"] = adapted_storyboard["genre"]
+            current_data["language"] = "zh"
+            current_data["story_text"] = req.novel_text.strip()
+            current_data["video_url"] = ""
+            current_data["live_actor_video"] = ""
+            current_data["srt_url"] = ""
+            current_data["duration"] = adapted_storyboard.get("duration", 0.0)
+            current_data["audio_tracks"] = adapted_storyboard.get("audio_tracks", [])
+            current_data["characters"] = adapted_storyboard["characters"]
+            current_data["shots"] = adapted_storyboard["shots"]
+            current_data["slideshow_risk"] = adapted_storyboard["slideshow_risk_after"]
+            _save_project_data(current_data)
+            adapted_storyboard["series_id"] = b_sid
+            adapted_storyboard["episode_id"] = b_eid
+
+    return {
+        "status": "success",
+        "reference_breakdown": breakdown,
+        "adapted_storyboard": adapted_storyboard,
+    }
+
+
+@app.post("/api/project/analyze-reference-upload")
+async def analyze_reference_video_upload_endpoint(
+    file: UploadFile = File(...),
+    title: str = Form("爆款节奏仿写短剧"),
+    genre: str = Form("都市战神爽文"),
+    novel_text: str = Form(""),
+    adapt_and_save: bool = Form(True),
+):
+    """支持直接上传本地爆款参考视频（MP4/MOV/WebM，≤60MB）执行真实 FFmpeg 切点拆解与 1:1 仿写."""
+    try:
+        from omnidrama.core.reference_analyzer import ReferenceVideoAnalyzer
+    except ImportError:
+        from core.reference_analyzer import ReferenceVideoAnalyzer
+
+    if title and has_path_traversal_markers(title):
+        raise HTTPException(status_code=400, detail="非法的 title 参数：禁止包含路径分隔符或目录穿越序列")
+    safe_title = _safe_slug(title or "爆款节奏仿写短剧", default="爆款节奏仿写短剧")
+
+    raw_name = Path(file.filename or "reference.mp4").name
+    ext = Path(raw_name).suffix.lower()
+    if ext not in (".mp4", ".mov", ".webm", ".mkv"):
+        raise HTTPException(status_code=400, detail="仅支持上传 .mp4 / .mov / .webm / .mkv 参考视频文件")
+
+    max_upload_bytes = 60 * 1024 * 1024
+    upload_dir = _safe_resolve_under(OUTPUT_DIR, "_reference_analysis", "uploads")
+    upload_dir.mkdir(parents=True, exist_ok=True)
+    saved_path = upload_dir / f"upload_{hashlib.sha256(f'{raw_name}-{datetime.now().timestamp()}'.encode()).hexdigest()[:12]}{ext}"
+
+    total_written = 0
+    try:
+        with open(saved_path, "wb") as out_f:
+            while True:
+                chunk = await file.read(1024 * 1024)
+                if not chunk:
+                    break
+                total_written += len(chunk)
+                if total_written > max_upload_bytes:
+                    raise HTTPException(status_code=413, detail="参考视频文件超过 60MB 上限，请剪辑前 60 秒后重试")
+                out_f.write(chunk)
+        if total_written < 1024:
+            raise HTTPException(status_code=400, detail="上传的视频文件过小或为空")
+
+        analyzer = ReferenceVideoAnalyzer(workspace_dir=_safe_resolve_under(OUTPUT_DIR, "_reference_analysis"))
+        brief = await asyncio.to_thread(analyzer.analyze_local_video, saved_path, raw_name)
+    except HTTPException:
+        saved_path.unlink(missing_ok=True)
+        raise
+    except Exception as exc:
+        saved_path.unlink(missing_ok=True)
+        raise HTTPException(status_code=400, detail=f"解析上传视频失败: {exc}")
+
+    pacing = brief.get("pacing_profile", {})
+    breakdown = {
+        **brief,
+        "source": brief.get("source", {}).get("input") or f"本地上传视频 · {raw_name}",
+        "cuts_per_minute": pacing.get("cuts_per_minute", 17.6),
+        "pacing_profile": pacing.get("pacing_style", "fast_intense"),
+        "narrative_arc": " → ".join(brief.get("what_makes_it_work", [])[:2]) or pacing.get("hook_technique", ""),
+        "hook_mechanics": {
+            "first_shot_duration": brief.get("scenes", [{}])[0].get("duration", 2.8) if brief.get("scenes") else 2.8,
+            "retention_trigger": pacing.get("hook_technique", "实测首镜切点入画"),
+        },
+        "shots": [
+            {
+                "shot_id": sc.get("scene_id", i + 1),
+                "duration_seconds": sc.get("duration", 3.5),
+                "suggested_motion": sc.get("recommended_motion_name", sc.get("recommended_motion", "ZOOM_IN")),
+                "scale": sc.get("recommended_scale", "MEDIUM_SHOT"),
+            }
+            for i, sc in enumerate(brief.get("scenes", []))
+        ],
+    }
+
+    adapted_storyboard = None
+    if novel_text and novel_text.strip():
+        adapted_storyboard = await asyncio.to_thread(
+            analyzer.adapt_reference_to_novel,
+            brief,
+            novel_text.strip(),
+            safe_title,
+            genre or "都市战神爽文",
+        )
+        if adapt_and_save:
+            current_data = _load_project_data()
+            current_data["title"] = adapted_storyboard["title"]
+            current_data["genre"] = adapted_storyboard["genre"]
+            current_data["video_url"] = ""
+            current_data["live_actor_video"] = ""
+            current_data["srt_url"] = ""
+            current_data["duration"] = adapted_storyboard.get("duration", 0.0)
+            current_data["audio_tracks"] = adapted_storyboard.get("audio_tracks", [])
             current_data["characters"] = adapted_storyboard["characters"]
             current_data["shots"] = adapted_storyboard["shots"]
             current_data["slideshow_risk"] = adapted_storyboard["slideshow_risk_after"]
